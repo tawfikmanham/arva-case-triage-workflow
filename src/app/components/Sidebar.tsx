@@ -6,8 +6,8 @@ import {
   Clock,
   CheckCircle2,
   Settings,
-  Shield,
 } from 'lucide-react';
+import arvaLogo from '../../assets/arva-logo.svg';
 
 const navItems = [
   { icon: Inbox, label: 'Case Inbox', path: '/', count: 13 },
@@ -25,10 +25,7 @@ export function Sidebar() {
     <aside className="w-[220px] min-w-[220px] bg-[#023547] flex flex-col h-screen sticky top-0">
       {/* Logo */}
       <div className="px-5 py-5 flex items-center gap-2.5">
-        <Shield className="w-6 h-6 text-white" />
-        <span className="text-white tracking-tight" style={{ fontSize: '18px', fontWeight: 600 }}>
-          arva
-        </span>
+        <img src={arvaLogo} alt="Arva logo" className="h-5 w-auto" />
         <span className="text-white/50 ml-auto" style={{ fontSize: '11px' }}>
           v2.4
         </span>
@@ -76,10 +73,10 @@ export function Sidebar() {
         <div className="space-y-1.5">
           <div className="flex justify-between text-white/70" style={{ fontSize: '12px' }}>
             <span>Processed</span>
-            <span className="text-white" style={{ fontWeight: 500 }}>87 / 124</span>
+            <span className="text-white" style={{ fontWeight: 500 }}>0 / 120</span>
           </div>
           <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-            <div className="h-full bg-[#00A63E] rounded-full" style={{ width: '70%' }} />
+            <div className="h-full bg-[#00A63E] rounded-full" style={{ width: '0%' }} />
           </div>
           <div className="flex justify-between text-white/70" style={{ fontSize: '12px' }}>
             <span>Avg. time</span>

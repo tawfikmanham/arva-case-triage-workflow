@@ -56,13 +56,6 @@ export function SlaTimer({ minutesRemaining, totalMinutes, compact = false }: Sl
         )}
         <span>{timeStr}</span>
       </div>
-      {/* Progress bar */}
-      <div className="w-12 h-1.5 bg-[#EFEFEF] rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${Math.max(percentage, 3)}%`, backgroundColor: c.ring }}
-        />
-      </div>
     </div>
   );
 }

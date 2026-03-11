@@ -1,7 +1,15 @@
 export type CaseStatus = 'new' | 'in_review' | 'escalated' | 'pending_info' | 'closed';
 export type Priority = 'critical' | 'high' | 'medium' | 'low';
 export type EvidenceStrength = 'high' | 'medium' | 'low';
-export type Signal = 'Name Match' | 'Country Risk' | 'Adverse Media' | 'PEP' | 'Sanctions Hit' | 'UBO Mismatch' | 'High Volume' | 'Shell Indicator';
+export type Signal =
+  | 'Name Match'
+  | 'Country Risk'
+  | 'Adverse Media'
+  | 'PEP'
+  | 'Sanctions Hit'
+  | 'UBO Mismatch'
+  | 'High Volume'
+  | 'Shell Indicator';
 
 export interface CaseItem {
   id: string;
@@ -22,247 +30,159 @@ export interface CaseItem {
   caseType: string;
 }
 
-export const cases: CaseItem[] = [
-  // ACME LTD duplicate group
-  {
-    id: 'AML-2026-4871',
-    entityName: 'ACME LTD',
-    entityType: 'Corporate',
-    signals: ['Name Match', 'Country Risk', 'Adverse Media'],
-    evidenceStrength: 'high',
-    riskScore: 92,
-    priority: 'critical',
-    slaMinutesRemaining: 12,
-    slaTotalMinutes: 240,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: 'grp-acme',
-    duplicateCount: 6,
-    createdAt: '2026-03-11T06:12:00Z',
-    country: 'CY',
-    caseType: 'AML Alert',
-  },
-  {
-    id: 'AML-2026-4872',
-    entityName: 'ACME LTD',
-    entityType: 'Corporate',
-    signals: ['Name Match', 'Shell Indicator'],
-    evidenceStrength: 'medium',
-    riskScore: 78,
-    priority: 'high',
-    slaMinutesRemaining: 45,
-    slaTotalMinutes: 240,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: 'grp-acme',
-    duplicateCount: 6,
-    createdAt: '2026-03-11T05:48:00Z',
-    country: 'CY',
-    caseType: 'KYC Review',
-  },
-  {
-    id: 'AML-2026-4873',
-    entityName: 'ACME Trading Corp',
-    entityType: 'Corporate',
-    signals: ['Name Match', 'UBO Mismatch'],
-    evidenceStrength: 'medium',
-    riskScore: 71,
-    priority: 'high',
-    slaMinutesRemaining: 62,
-    slaTotalMinutes: 240,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: 'grp-acme',
-    duplicateCount: 6,
-    createdAt: '2026-03-11T05:30:00Z',
-    country: 'CY',
-    caseType: 'AML Alert',
-  },
-  // John Smith
-  {
-    id: 'AML-2026-4880',
-    entityName: 'John Smith',
-    entityType: 'Individual',
-    signals: ['PEP', 'Sanctions Hit', 'Adverse Media'],
-    evidenceStrength: 'high',
-    riskScore: 97,
-    priority: 'critical',
-    slaMinutesRemaining: 8,
-    slaTotalMinutes: 120,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-11T07:02:00Z',
-    country: 'RU',
-    caseType: 'Sanctions Screening',
-  },
-  // Meridian Finance Group
-  {
-    id: 'AML-2026-4856',
-    entityName: 'Meridian Finance Group',
-    entityType: 'Corporate',
-    signals: ['High Volume', 'Country Risk'],
-    evidenceStrength: 'medium',
-    riskScore: 64,
-    priority: 'medium',
-    slaMinutesRemaining: 180,
-    slaTotalMinutes: 480,
-    status: 'in_review',
-    assignedAnalyst: 'Sarah Chen',
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-10T22:15:00Z',
-    country: 'AE',
-    caseType: 'Transaction Monitoring',
-  },
-  // Greenleaf Holdings duplicate group
-  {
-    id: 'AML-2026-4890',
-    entityName: 'Greenleaf Holdings Ltd',
-    entityType: 'Corporate',
-    signals: ['Shell Indicator', 'UBO Mismatch', 'Country Risk'],
-    evidenceStrength: 'high',
-    riskScore: 85,
-    priority: 'high',
-    slaMinutesRemaining: 28,
-    slaTotalMinutes: 240,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: 'grp-greenleaf',
-    duplicateCount: 3,
-    createdAt: '2026-03-11T04:20:00Z',
-    country: 'VG',
-    caseType: 'KYC Review',
-  },
-  {
-    id: 'AML-2026-4891',
-    entityName: 'Greenleaf Holdings Ltd',
-    entityType: 'Corporate',
-    signals: ['Name Match', 'Country Risk'],
-    evidenceStrength: 'medium',
-    riskScore: 68,
-    priority: 'medium',
-    slaMinutesRemaining: 95,
-    slaTotalMinutes: 240,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: 'grp-greenleaf',
-    duplicateCount: 3,
-    createdAt: '2026-03-11T03:50:00Z',
-    country: 'VG',
-    caseType: 'AML Alert',
-  },
-  // Individual cases
-  {
-    id: 'AML-2026-4845',
-    entityName: 'Elena Volkov',
-    entityType: 'Individual',
-    signals: ['Adverse Media'],
-    evidenceStrength: 'low',
-    riskScore: 42,
-    priority: 'low',
-    slaMinutesRemaining: 350,
-    slaTotalMinutes: 480,
-    status: 'in_review',
-    assignedAnalyst: 'Marcus Reid',
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-10T18:30:00Z',
-    country: 'UA',
-    caseType: 'AML Alert',
-  },
-  {
-    id: 'AML-2026-4900',
-    entityName: 'Pacific Rim Trading Co',
-    entityType: 'Corporate',
-    signals: ['High Volume', 'Country Risk', 'Name Match'],
-    evidenceStrength: 'medium',
-    riskScore: 73,
-    priority: 'high',
-    slaMinutesRemaining: 55,
-    slaTotalMinutes: 240,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-11T06:45:00Z',
-    country: 'MM',
-    caseType: 'Transaction Monitoring',
-  },
-  {
-    id: 'AML-2026-4910',
-    entityName: 'Bright Star Consulting',
-    entityType: 'Corporate',
-    signals: ['Name Match'],
-    evidenceStrength: 'low',
-    riskScore: 31,
-    priority: 'low',
-    slaMinutesRemaining: 420,
-    slaTotalMinutes: 480,
-    status: 'in_review',
-    assignedAnalyst: 'Sarah Chen',
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-10T14:00:00Z',
-    country: 'GB',
-    caseType: 'KYC Review',
-  },
-  {
-    id: 'AML-2026-4920',
-    entityName: 'Al-Rashid Enterprises',
-    entityType: 'Corporate',
-    signals: ['Sanctions Hit', 'Country Risk', 'PEP'],
-    evidenceStrength: 'high',
-    riskScore: 95,
-    priority: 'critical',
-    slaMinutesRemaining: 18,
-    slaTotalMinutes: 120,
-    status: 'new',
-    assignedAnalyst: null,
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-11T07:15:00Z',
-    country: 'IR',
-    caseType: 'Sanctions Screening',
-  },
-  {
-    id: 'AML-2026-4835',
-    entityName: 'Nordica Shipping AS',
-    entityType: 'Corporate',
-    signals: ['High Volume'],
-    evidenceStrength: 'low',
-    riskScore: 28,
-    priority: 'low',
-    slaMinutesRemaining: 440,
-    slaTotalMinutes: 480,
-    status: 'pending_info',
-    assignedAnalyst: 'Marcus Reid',
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-10T11:00:00Z',
-    country: 'NO',
-    caseType: 'Transaction Monitoring',
-  },
-  {
-    id: 'AML-2026-4815',
-    entityName: 'TechBridge Solutions',
-    entityType: 'Corporate',
-    signals: ['Name Match', 'Adverse Media'],
-    evidenceStrength: 'medium',
-    riskScore: 56,
-    priority: 'medium',
-    slaMinutesRemaining: 210,
-    slaTotalMinutes: 480,
-    status: 'escalated',
-    assignedAnalyst: 'Sarah Chen',
-    duplicateGroupId: null,
-    duplicateCount: 0,
-    createdAt: '2026-03-10T09:20:00Z',
-    country: 'SG',
-    caseType: 'AML Alert',
-  },
+const signalsPool: Signal[] = [
+  'Name Match',
+  'Country Risk',
+  'Adverse Media',
+  'PEP',
+  'Sanctions Hit',
+  'UBO Mismatch',
+  'High Volume',
+  'Shell Indicator',
 ];
+
+const countries = ['GB', 'US', 'CY', 'AE', 'RU', 'IR', 'SG', 'VG', 'MM', 'UA', 'NO', 'HK'];
+const caseTypes = ['AML Alert', 'KYC Review', 'Sanctions Screening', 'Transaction Monitoring'];
+const entityTypes = ['Corporate', 'Individual'];
+const analysts = ['Sarah Chen', 'Marcus Reid', 'Liam Patel', 'Nora Ali'];
+
+const duplicateGroupNames = [
+  'ACME LTD',
+  'Greenleaf Holdings Ltd',
+  'Pacific Rim Trading Co',
+  'Meridian Finance Group',
+  'Nordica Shipping AS',
+  'Bright Star Consulting',
+  'Orchid Capital Partners',
+  'Bluewater Logistics',
+  'Aster Global Ventures',
+  'Summit Ridge Holdings',
+];
+
+let seed = 42;
+function rng() {
+  seed = (seed * 1664525 + 1013904223) % 4294967296;
+  return seed / 4294967296;
+}
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
+function pickUniqueSignals(count: number) {
+  const pool = [...signalsPool];
+  const selected: Signal[] = [];
+  while (selected.length < count && pool.length) {
+    const idx = Math.floor(rng() * pool.length);
+    selected.push(pool.splice(idx, 1)[0]);
+  }
+  return selected;
+}
+
+function riskScoreFor(priority: Priority) {
+  if (priority === 'critical') return Math.floor(85 + rng() * 15);
+  if (priority === 'high') return Math.floor(70 + rng() * 15);
+  if (priority === 'medium') return Math.floor(45 + rng() * 25);
+  return Math.floor(20 + rng() * 20);
+}
+
+function evidenceForSignals(count: number): EvidenceStrength {
+  if (count >= 3) return rng() > 0.2 ? 'high' : 'medium';
+  if (count === 2) return rng() > 0.5 ? 'medium' : 'low';
+  return 'low';
+}
+
+function statusForIndex(i: number): CaseStatus {
+  if (i < 80) return 'new';
+  if (i < 95) return 'in_review';
+  if (i < 105) return 'pending_info';
+  if (i < 115) return 'escalated';
+  return 'closed';
+}
+
+function makeId(i: number) {
+  return `AML-2026-${4800 + i}`;
+}
+
+function makeCreatedAt(i: number) {
+  const base = new Date('2026-03-11T07:00:00Z');
+  base.setMinutes(base.getMinutes() - i * 7);
+  return base.toISOString();
+}
+
+const cases: CaseItem[] = [];
+let idx = 0;
+
+// 30 duplicates across 10 entities (3 each)
+for (let g = 0; g < duplicateGroupNames.length; g += 1) {
+  const groupId = `grp-${g + 1}`;
+  for (let k = 0; k < 3; k += 1) {
+    const isHighPriority = idx < 15;
+    const priority: Priority = idx < 5 ? 'critical' : idx < 15 ? 'high' : 'medium';
+    const signalsCount = 1 + Math.floor(rng() * 4);
+    const signals = pickUniqueSignals(signalsCount);
+    const slaTotalMinutes = isHighPriority ? 240 : 480;
+    const slaMinutesRemaining = isHighPriority
+      ? 10 + Math.floor(rng() * 50)
+      : 180 + Math.floor(rng() * 240);
+
+    cases.push({
+      id: makeId(idx),
+      entityName: duplicateGroupNames[g],
+      entityType: pick(entityTypes),
+      signals,
+      evidenceStrength: evidenceForSignals(signals.length),
+      riskScore: riskScoreFor(priority),
+      priority,
+      slaMinutesRemaining,
+      slaTotalMinutes,
+      status: statusForIndex(idx),
+      assignedAnalyst: statusForIndex(idx) === 'new' ? null : pick(analysts),
+      duplicateGroupId: groupId,
+      duplicateCount: 3,
+      createdAt: makeCreatedAt(idx),
+      country: pick(countries),
+      caseType: pick(caseTypes),
+    });
+
+    idx += 1;
+  }
+}
+
+// 90 standalone cases
+for (let i = 0; i < 90; i += 1) {
+  const isHighPriority = idx < 15;
+  const priority: Priority = idx < 5 ? 'critical' : idx < 15 ? 'high' : rng() > 0.5 ? 'medium' : 'low';
+  const signalsCount = 1 + Math.floor(rng() * 4);
+  const signals = pickUniqueSignals(signalsCount);
+  const slaTotalMinutes = isHighPriority ? 240 : 480;
+  const slaMinutesRemaining = isHighPriority
+    ? 10 + Math.floor(rng() * 50)
+    : 180 + Math.floor(rng() * 240);
+
+  cases.push({
+    id: makeId(idx),
+    entityName: `${pick(['Atlas', 'Orion', 'Nimbus', 'Helix', 'Pioneer', 'Vertex', 'Everest', 'Axiom', 'Lumen', 'Cedar'])} ${pick(['Holdings', 'Capital', 'Logistics', 'Trading', 'Ventures', 'Group', 'Partners'])} ${idx}`,
+    entityType: pick(entityTypes),
+    signals,
+    evidenceStrength: evidenceForSignals(signals.length),
+    riskScore: riskScoreFor(priority),
+    priority,
+    slaMinutesRemaining,
+    slaTotalMinutes,
+    status: statusForIndex(idx),
+    assignedAnalyst: statusForIndex(idx) === 'new' ? null : pick(analysts),
+    duplicateGroupId: null,
+    duplicateCount: 0,
+    createdAt: makeCreatedAt(idx),
+    country: pick(countries),
+    caseType: pick(caseTypes),
+  });
+
+  idx += 1;
+}
+
+export { cases };
 
 export const statusLabels: Record<CaseStatus, string> = {
   new: 'New',
