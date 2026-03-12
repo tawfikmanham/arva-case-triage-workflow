@@ -59,6 +59,12 @@ const duplicateGroupNames = [
   'Summit Ridge Holdings',
 ];
 
+function inferEntityType(entityName: string): (typeof entityTypes)[number] {
+  const corporatePattern = /\b(ltd|limited|llc|inc|corp|co|company|group|holdings|capital|partners|ventures|logistics|finance|trading|shipping|consulting)\b/i;
+  if (corporatePattern.test(entityName)) return 'Corporate';
+  return 'Individual';
+}
+
 let seed = 42;
 function rng() {
   seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -126,10 +132,11 @@ for (let g = 0; g < duplicateGroupNames.length; g += 1) {
       ? 10 + Math.floor(rng() * 50)
       : 180 + Math.floor(rng() * 240);
 
+    const entityName = duplicateGroupNames[g];
     cases.push({
       id: makeId(idx),
-      entityName: duplicateGroupNames[g],
-      entityType: pick(entityTypes),
+      entityName,
+      entityType: inferEntityType(entityName),
       signals,
       evidenceStrength: evidenceForSignals(signals.length),
       riskScore: riskScoreFor(priority),
@@ -160,10 +167,11 @@ for (let i = 0; i < 90; i += 1) {
     ? 10 + Math.floor(rng() * 50)
     : 180 + Math.floor(rng() * 240);
 
+  const entityName = `${pick(['Atlas', 'Orion', 'Nimbus', 'Helix', 'Pioneer', 'Vertex', 'Everest', 'Axiom', 'Lumen', 'Cedar'])} ${pick(['Holdings', 'Capital', 'Logistics', 'Trading', 'Ventures', 'Group', 'Partners'])} ${idx}`;
   cases.push({
     id: makeId(idx),
-    entityName: `${pick(['Atlas', 'Orion', 'Nimbus', 'Helix', 'Pioneer', 'Vertex', 'Everest', 'Axiom', 'Lumen', 'Cedar'])} ${pick(['Holdings', 'Capital', 'Logistics', 'Trading', 'Ventures', 'Group', 'Partners'])} ${idx}`,
-    entityType: pick(entityTypes),
+    entityName,
+    entityType: inferEntityType(entityName),
     signals,
     evidenceStrength: evidenceForSignals(signals.length),
     riskScore: riskScoreFor(priority),
