@@ -2,9 +2,6 @@
 
 A realistic AML case triage and investigation interface built with React + Vite.
 
-### Short Description (for GitHub About)
-`AML case triage workflow UI with duplicate review, investigation workspace, and analyst decisioning.`
-
 ### What this project includes
 - Case Inbox with filtering, sorting, and analyst assignment
 - Duplicates page with grouped merge/unmerge workflows
@@ -42,3 +39,10 @@ The app is set up for Vercel static deployment.
 ### Notes
 - Main branch contains the latest merged updates.
 - UI data is mock AML case data for product/design exploration.
+
+### Thank You Note
+Thank you for taking the time to review this project.
+
+I genuinely had fun building this one. It pushed me outside my usual workflow in a good way: designing in Figma, using Figma MCP, building in VS Code, and pairing with Codex for AI-assisted and vibe coding.
+
+If this approach works well, great. If not, that is completely fine too. Either way, thank you for the opportunity.
