@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
   Search,
@@ -6,6 +6,11 @@ import {
   ChevronRight,
   ArrowUp,
   ArrowDown,
+  Filter,
+  User,
+  X,
+  Pencil,
+  Layers,
 } from 'lucide-react';
 import { cases, statusLabels, priorityOrder } from '../data/cases';
 import type { CaseItem, Priority, CaseStatus, Signal } from '../data/cases';
@@ -67,9 +72,8 @@ function StatusBadge({ status }: { status: CaseStatus }) {
   );
 }
 
-type SortField = 'sla' | 'risk' | 'priority' | 'entity';
+type SortField = 'sla' | 'risk' | 'priority' | 'entity' | 'evidence' | 'status' | 'analyst';
 type SortDir = 'asc' | 'desc';
-type GroupRationale = 'same_name' | 'same_address' | 'same_ubo' | 'other';
 
 export function CaseInbox() {
   const navigate = useNavigate();
@@ -79,14 +83,37 @@ export function CaseInbox() {
   const [ungroupedGroups, setUngroupedGroups] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('sla');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [statusFilter, setStatusFilter] = useState<CaseStatus | 'all'>('all');
-  const [priorityFilter, setPriorityFilter] = useState<Priority | 'all'>('all');
+  const [statusFilters, setStatusFilters] = useState<Set<CaseStatus>>(new Set());
+  const [priorityFilters, setPriorityFilters] = useState<Set<Priority>>(new Set());
+  const [pendingStatusFilters, setPendingStatusFilters] = useState<Set<CaseStatus>>(new Set());
+  const [pendingPriorityFilters, setPendingPriorityFilters] = useState<Set<Priority>>(new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement | null>(null);
+  const [analystMenuOpenFor, setAnalystMenuOpenFor] = useState<string | null>(null);
+  const [analystSearch, setAnalystSearch] = useState('');
+  const [assignedOverrides, setAssignedOverrides] = useState<Record<string, string | null>>({});
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [groupRationale, setGroupRationale] = useState('same_name');
+  const [groupConfidence, setGroupConfidence] = useState(82);
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    setPendingStatusFilters(new Set(statusFilters));
+    setPendingPriorityFilters(new Set(priorityFilters));
+    function onClickOutside(event: MouseEvent) {
+      if (!filterRef.current) return;
+      if (!filterRef.current.contains(event.target as Node)) {
+        setFiltersOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [filtersOpen, statusFilters, priorityFilters]);
+
+  const analysts = ['Sarah Chen', 'Marcus Reid', 'Liam Patel', 'Nora Ali', 'Ava Williams', 'Daniel Park'];
   const [manualGroups, setManualGroups] = useState<
-    { id: string; caseIds: string[]; rationale: GroupRationale; confidence?: number }[]
+    { id: string; caseIds: string[]; rationale: string; confidence?: number }[]
   >([]);
-  const [groupRationale, setGroupRationale] = useState<GroupRationale>('same_name');
-  const [groupConfidence, setGroupConfidence] = useState<number>(82);
 
   const queryFilter = useMemo(() => {
     const filter = new URLSearchParams(location.search).get('filter');
@@ -114,7 +141,7 @@ export function CaseInbox() {
   const effectiveGroupIdFor = (c: CaseItem) => {
     const manual = manualGroups.find((g) => g.caseIds.includes(c.id));
     if (manual) return manual.id;
-    return c.duplicateGroupId;
+    return null;
   };
 
   const createManualGroup = () => {
@@ -126,9 +153,23 @@ export function CaseInbox() {
     setExpandedGroups((prev) => new Set(prev).add(id));
   };
 
+
   const toggleSort = (field: SortField) => {
     if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortField(field); setSortDir('asc'); }
+  };
+
+  const statusOrder: Record<CaseStatus, number> = {
+    new: 0,
+    in_review: 1,
+    escalated: 2,
+    pending_info: 3,
+    closed: 4,
+  };
+  const evidenceOrder: Record<CaseItem['evidenceStrength'], number> = {
+    high: 0,
+    medium: 1,
+    low: 2,
   };
 
   const filteredAndSorted = useMemo(() => {
@@ -137,8 +178,8 @@ export function CaseInbox() {
         const q = searchQuery.toLowerCase();
         if (!c.entityName.toLowerCase().includes(q) && !c.id.toLowerCase().includes(q)) return false;
       }
-      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
-      if (priorityFilter !== 'all' && c.priority !== priorityFilter) return false;
+      if (statusFilters.size > 0 && !statusFilters.has(c.status)) return false;
+      if (priorityFilters.size > 0 && !priorityFilters.has(c.priority)) return false;
       if (queryFilter === 'critical' && c.priority !== 'critical') return false;
       if (queryFilter === 'sla' && (c.slaMinutesRemaining / c.slaTotalMinutes) > 0.15) return false;
       if (queryFilter === 'mine' && !c.assignedAnalyst) return false;
@@ -153,12 +194,20 @@ export function CaseInbox() {
         case 'risk': cmp = a.riskScore - b.riskScore; break;
         case 'priority': cmp = priorityOrder[a.priority] - priorityOrder[b.priority]; break;
         case 'entity': cmp = a.entityName.localeCompare(b.entityName); break;
+        case 'evidence': cmp = evidenceOrder[a.evidenceStrength] - evidenceOrder[b.evidenceStrength]; break;
+        case 'status': cmp = statusOrder[a.status] - statusOrder[b.status]; break;
+        case 'analyst': {
+          const aName = (assignedOverrides[a.id] ?? a.assignedAnalyst ?? '').toLowerCase();
+          const bName = (assignedOverrides[b.id] ?? b.assignedAnalyst ?? '').toLowerCase();
+          cmp = aName.localeCompare(bName);
+          break;
+        }
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
     return filtered;
-  }, [searchQuery, statusFilter, priorityFilter, sortField, sortDir, queryFilter]);
+  }, [searchQuery, statusFilters, priorityFilters, sortField, sortDir, queryFilter]);
 
   // Group cases by duplicate group
   const { groups, standalone } = useMemo(() => {
@@ -183,9 +232,12 @@ export function CaseInbox() {
     return standalone.map((c) => c.id);
   }, [standalone]);
 
+
   // Interleave groups and standalone by active sort
   const renderOrder = useMemo(() => {
-    type RenderItem = { type: 'group'; groupId: string; cases: CaseItem[] } | { type: 'case'; case: CaseItem };
+    type RenderItem =
+      | { type: 'group'; groupId: string; cases: CaseItem[] }
+      | { type: 'case'; case: CaseItem };
     const items: RenderItem[] = [];
 
     groups.forEach((cases, groupId) => {
@@ -205,12 +257,23 @@ export function CaseInbox() {
           return Math.min(...groupCases.map((c) => priorityOrder[c.priority]));
         case 'entity':
           return groupCases[0]?.entityName ?? '';
+        case 'evidence':
+          return Math.min(...groupCases.map((c) => evidenceOrder[c.evidenceStrength]));
+        case 'status':
+          return Math.min(...groupCases.map((c) => statusOrder[c.status]));
+        case 'analyst': {
+          const names = groupCases
+            .map((c) => (assignedOverrides[c.id] ?? c.assignedAnalyst ?? '').toLowerCase())
+            .filter(Boolean)
+            .sort();
+          return names[0] ?? '';
+        }
       }
     };
 
     items.sort((a, b) => {
       let cmp = 0;
-      if (sortField === 'entity') {
+      if (sortField === 'entity' || sortField === 'analyst') {
         const valA = a.type === 'group' ? (getGroupValue(a.cases) as string) : a.case.entityName;
         const valB = b.type === 'group' ? (getGroupValue(b.cases) as string) : b.case.entityName;
         cmp = valA.localeCompare(valB);
@@ -220,14 +283,22 @@ export function CaseInbox() {
             ? a.case.slaMinutesRemaining
             : sortField === 'risk'
               ? a.case.riskScore
-              : priorityOrder[a.case.priority]
+              : sortField === 'evidence'
+                ? evidenceOrder[a.case.evidenceStrength]
+                : sortField === 'status'
+                  ? statusOrder[a.case.status]
+                  : priorityOrder[a.case.priority]
         );
         const valB = b.type === 'group' ? (getGroupValue(b.cases) as number) : (
           sortField === 'sla'
             ? b.case.slaMinutesRemaining
             : sortField === 'risk'
               ? b.case.riskScore
-              : priorityOrder[b.case.priority]
+              : sortField === 'evidence'
+                ? evidenceOrder[b.case.evidenceStrength]
+                : sortField === 'status'
+                  ? statusOrder[b.case.status]
+                  : priorityOrder[b.case.priority]
         );
         cmp = valA - valB;
       }
@@ -266,13 +337,20 @@ export function CaseInbox() {
     const isCriticalSla = (c.slaMinutesRemaining / c.slaTotalMinutes) <= 0.15;
     const signalsToShow = c.signals.slice(0, 2);
     const remainingSignals = c.signals.length - signalsToShow.length;
+    const assigned = assignedOverrides[c.id] ?? c.assignedAnalyst;
+    const isMenuOpen = analystMenuOpenFor === c.id;
+    const filteredAnalysts = analysts.filter((a) => a.toLowerCase().includes(analystSearch.toLowerCase()));
+    const initials = assigned ? assigned.split(' ').map((p) => p[0]).join('').slice(0, 2) : '';
+    const suggestedGroupId = c.duplicateGroupId;
+    const isFirstInSuggestion =
+      suggestedGroupId && filteredAndSorted.find((x) => x.duplicateGroupId === suggestedGroupId)?.id === c.id;
     return (
       <tr
         key={c.id}
         onClick={() => navigate(`/case/${c.id}`)}
-        className={`group cursor-pointer transition-colors border-b border-[#EFEFEF] last:border-0 ${
-          isCriticalSla ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-[#F9FAFB]'
-        } ${isGroupChild ? 'bg-[#FAFBFC]' : ''}`}
+        className={`group cursor-pointer transition-colors border-b border-[#EFEFEF] last:border-0 hover:bg-[#F9FAFB] ${
+          isGroupChild ? 'bg-[#FAFBFC]' : ''
+        }`}
       >
         {/* Select */}
         <td className="p-2 pl-4" style={{ width: '28px' }}>
@@ -293,7 +371,7 @@ export function CaseInbox() {
           )}
         </td>
         {/* Priority + ID */}
-        <td className="py-2.5 px-3" style={{ width: '160px' }}>
+        <td className="py-2.5 px-3 pl-4" style={{ width: '160px' }}>
           <div className="flex items-center gap-2">
             {isGroupChild && <span className="w-3 border-l-2 border-b-2 border-[#E5E7EB] h-3 flex-shrink-0 -mt-2 ml-1" />}
             <div>
@@ -362,24 +440,112 @@ export function CaseInbox() {
         </td>
         {/* Analyst */}
         <td className="py-2.5 px-3" style={{ width: '110px' }}>
-          {c.assignedAnalyst ? (
-            <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>{c.assignedAnalyst}</span>
-          ) : (
-            <span className="text-[#D1D5DB]" style={{ fontSize: '12px' }}>Unassigned</span>
-          )}
+          <div className="relative">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setAnalystMenuOpenFor(isMenuOpen ? null : c.id);
+                setAnalystSearch('');
+              }}
+              className="text-left w-full flex items-center gap-2"
+            >
+              <div className="flex items-center gap-2 flex-1">
+                {assigned ? (
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#E5E7EB] text-[#6B7280]" style={{ fontSize: '9px', fontWeight: 600 }}>
+                    {initials}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#F3F4F6] text-[#9CA3AF]">
+                    <User className="w-3 h-3" />
+                  </span>
+                )}
+                {assigned ? (
+                  <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>{assigned}</span>
+                ) : (
+                  <span className="text-[#D1D5DB]" style={{ fontSize: '12px' }}>Unassigned</span>
+                )}
+              </div>
+              <Pencil className="w-3.5 h-3.5 text-[#9CA3AF]" />
+            </button>
+
+            {isMenuOpen && (
+              <div
+                className="absolute right-0 mt-2 w-52 bg-white border border-[#E5E7EB] rounded-md shadow-sm p-2 z-20"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="text"
+                  placeholder="Search team..."
+                  value={analystSearch}
+                  onChange={(e) => setAnalystSearch(e.target.value)}
+                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none"
+                  style={{ fontSize: '12px' }}
+                />
+                <div className="mt-2 max-h-36 overflow-auto">
+                  {filteredAnalysts.map((a) => (
+                    <div
+                      key={a}
+                      className="w-full flex items-center justify-between px-2 py-1 rounded hover:bg-[#F3F4F6]"
+                    >
+                      <button
+                        onClick={() => {
+                          setAssignedOverrides((prev) => ({ ...prev, [c.id]: a }));
+                          setAnalystMenuOpenFor(null);
+                        }}
+                        className="text-left text-[#1A1E21] flex-1"
+                        style={{ fontSize: '12px' }}
+                      >
+                        {a}
+                      </button>
+                      {assigned === a && (
+                        <button
+                          onClick={() => {
+                            setAssignedOverrides((prev) => ({ ...prev, [c.id]: null }));
+                            setAnalystMenuOpenFor(null);
+                          }}
+                          className="text-[#6B7280] hover:text-[#1A1E21]"
+                          aria-label="Unassign"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </td>
         {/* Actions */}
         <td className="py-2.5 px-3" style={{ width: '120px' }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/case/${c.id}`);
-            }}
-            className="px-2.5 py-1 rounded-md border border-[#E5E7EB] text-[#1A1E21] hover:bg-white"
-            style={{ fontSize: '11px', fontWeight: 500 }}
-          >
-            Review
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/case/${c.id}`);
+              }}
+              className="px-2.5 py-1 rounded-md border border-[#E5E7EB] text-[#1A1E21] hover:bg-white"
+              style={{ fontSize: '11px', fontWeight: 500 }}
+            >
+              Review
+            </button>
+            {isFirstInSuggestion && suggestedGroupId && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const suggestedIds = filteredAndSorted
+                    .filter((x) => x.duplicateGroupId === suggestedGroupId)
+                    .map((x) => x.id);
+                  setSelectedCaseIds(new Set(suggestedIds));
+                }}
+                className="px-2 py-1 rounded-md border border-[#E5E7EB] text-[#1E40AF] hover:bg-white flex items-center gap-1"
+                style={{ fontSize: '11px', fontWeight: 500 }}
+              >
+                <Layers className="w-3 h-3" />
+                Group
+              </button>
+            )}
+          </div>
         </td>
       </tr>
     );
@@ -397,7 +563,9 @@ export function CaseInbox() {
     const evidenceSet = new Set(groupCases.map((c) => c.evidenceStrength));
     const evidenceLabel = evidenceSet.size === 1 ? groupCases[0].evidenceStrength : 'mixed';
     const statusSet = new Set(groupCases.map((c) => c.status));
-    const analystSet = new Set(groupCases.map((c) => c.assignedAnalyst).filter(Boolean));
+    const analystSet = new Set(
+      groupCases.map((c) => assignedOverrides[c.id] ?? c.assignedAnalyst).filter(Boolean)
+    );
     const statusLabel = statusSet.size === 1 ? statusLabels[groupCases[0].status] : 'Mixed';
 
     const signalCounts = new Map<string, number>();
@@ -409,6 +577,21 @@ export function CaseInbox() {
     const remainingSignals = Math.max(signalCounts.size - topSignals.length, 0);
 
     const manualGroup = manualGroups.find((g) => g.id === groupId);
+    const isMenuOpen = analystMenuOpenFor === `group:${groupId}`;
+    const filteredAnalysts = analysts.filter((a) => a.toLowerCase().includes(analystSearch.toLowerCase()));
+    const groupAssigned = analystSet.size === 1 ? Array.from(analystSet)[0] : null;
+    const groupInitials = groupAssigned ? groupAssigned.split(' ').map((p) => p[0]).join('').slice(0, 2) : '';
+
+    const setGroupAssignment = (name: string | null) => {
+      setAssignedOverrides((prev) => {
+        const next = { ...prev };
+        groupCases.forEach((c) => {
+          next[c.id] = name;
+        });
+        return next;
+      });
+      setAnalystMenuOpenFor(null);
+    };
 
     return (
       <React.Fragment>
@@ -419,7 +602,7 @@ export function CaseInbox() {
           {/* Select */}
           <td className="p-2 pl-4" style={{ width: '28px' }} />
           {/* Priority */}
-          <td className="py-2.5 px-3" style={{ width: '160px' }}>
+          <td className="py-2.5 px-3 pl-4" style={{ width: '160px' }}>
             <div className="flex items-center gap-2">
               <PriorityIndicator priority={groupPriority} />
               <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>
@@ -500,15 +683,77 @@ export function CaseInbox() {
           </td>
           {/* Analyst */}
           <td className="py-2.5 px-3" style={{ width: '110px' }}>
-            {analystSet.size === 0 ? (
-              <span className="text-[#D1D5DB]" style={{ fontSize: '12px' }}>Unassigned</span>
-            ) : analystSet.size === 1 ? (
-              <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>
-                {Array.from(analystSet)[0]}
-              </span>
-            ) : (
-              <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>Multiple</span>
-            )}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAnalystMenuOpenFor(isMenuOpen ? null : `group:${groupId}`);
+                  setAnalystSearch('');
+                }}
+                className="text-left w-full flex items-center gap-2"
+              >
+                <div className="flex items-center gap-2 flex-1">
+                  {analystSet.size === 1 ? (
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#E5E7EB] text-[#6B7280]" style={{ fontSize: '9px', fontWeight: 600 }}>
+                      {groupInitials}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#F3F4F6] text-[#9CA3AF]">
+                      <User className="w-3 h-3" />
+                    </span>
+                  )}
+                  {analystSet.size === 0 ? (
+                    <span className="text-[#D1D5DB]" style={{ fontSize: '12px' }}>Unassigned</span>
+                  ) : analystSet.size === 1 ? (
+                    <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>{groupAssigned}</span>
+                  ) : (
+                    <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>Multiple</span>
+                  )}
+                </div>
+                <Pencil className="w-3.5 h-3.5 text-[#9CA3AF]" />
+              </button>
+
+              {isMenuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-52 bg-white border border-[#E5E7EB] rounded-md shadow-sm p-2 z-20"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="text"
+                    placeholder="Search team..."
+                    value={analystSearch}
+                    onChange={(e) => setAnalystSearch(e.target.value)}
+                    className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none"
+                    style={{ fontSize: '12px' }}
+                  />
+                  <div className="mt-2 max-h-36 overflow-auto">
+                    {filteredAnalysts.map((a) => (
+                      <div
+                        key={a}
+                        className="w-full flex items-center justify-between px-2 py-1 rounded hover:bg-[#F3F4F6]"
+                      >
+                        <button
+                          onClick={() => setGroupAssignment(a)}
+                          className="text-left text-[#1A1E21] flex-1"
+                          style={{ fontSize: '12px' }}
+                        >
+                          {a}
+                        </button>
+                        {groupAssigned === a && (
+                          <button
+                            onClick={() => setGroupAssignment(null)}
+                            className="text-[#6B7280] hover:text-[#1A1E21]"
+                            aria-label="Unassign"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </td>
           {/* Actions */}
           <td className="py-2.5 px-3" style={{ width: '120px' }}>
@@ -556,7 +801,7 @@ export function CaseInbox() {
               className="bg-white border-b border-[#EFEFEF] hover:bg-[#F9FAFB]"
             >
               <td className="p-2 pl-4" style={{ width: '28px' }} />
-              <td className="py-2 px-3" style={{ width: '160px' }}>
+              <td className="py-2 px-3 pl-4" style={{ width: '160px' }}>
                 <div className="flex items-center gap-2">
                   <span className="w-3 border-l-2 border-b-2 border-[#E5E7EB] h-3 flex-shrink-0 -mt-2 ml-1" />
                   <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>{c.id}</span>
@@ -606,8 +851,10 @@ export function CaseInbox() {
                 <StatusBadge status={c.status} />
               </td>
               <td className="py-2 px-3" style={{ width: '110px' }}>
-                {c.assignedAnalyst ? (
-                  <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>{c.assignedAnalyst}</span>
+                {assignedOverrides[c.id] ?? c.assignedAnalyst ? (
+                  <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>
+                    {assignedOverrides[c.id] ?? c.assignedAnalyst}
+                  </span>
                 ) : (
                   <span className="text-[#D1D5DB]" style={{ fontSize: '12px' }}>Unassigned</span>
                 )}
@@ -674,111 +921,251 @@ export function CaseInbox() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as CaseStatus | 'all')}
-              className="bg-white border border-[#EFEFEF] rounded-md px-2.5 py-1.5 text-[#1A1E21] outline-none cursor-pointer"
-              style={{ fontSize: '12px' }}
-            >
-              <option value="all">All Status</option>
-              <option value="new">New</option>
-              <option value="in_review">In Review</option>
-              <option value="escalated">Escalated</option>
-              <option value="pending_info">Pending Info</option>
-            </select>
+          <div className="flex items-center gap-2 ml-auto">
+            {(searchQuery || statusFilters.size > 0 || priorityFilters.size > 0) && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setStatusFilters(new Set());
+                    setPriorityFilters(new Set());
+                  }}
+                  className="text-[#6B7280] hover:text-[#1A1E21]"
+                  style={{ fontSize: '11px', fontWeight: 600 }}
+                >
+                  Clear all
+                </button>
+                {searchQuery && (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F3F4F6] text-[#1A1E21] border border-[#E5E7EB]" style={{ fontSize: '11px', fontWeight: 500 }}>
+                    Search: {searchQuery}
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="text-[#6B7280] hover:text-[#1A1E21]"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {Array.from(statusFilters).map((status) => (
+                  <span key={status} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]" style={{ fontSize: '11px', fontWeight: 500 }}>
+                    Status: {statusLabels[status]}
+                    <button
+                      onClick={() => {
+                        setStatusFilters((prev) => {
+                          const next = new Set(prev);
+                          next.delete(status);
+                          return next;
+                        });
+                      }}
+                      className="text-[#1E40AF] hover:text-[#1E3A8A]"
+                      aria-label="Clear status filter"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {Array.from(priorityFilters).map((priority) => (
+                  <span key={priority} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FFF7ED] text-[#9A3412] border border-[#FED7AA]" style={{ fontSize: '11px', fontWeight: 500 }}>
+                    Priority: {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                    <button
+                      onClick={() => {
+                        setPriorityFilters((prev) => {
+                          const next = new Set(prev);
+                          next.delete(priority);
+                          return next;
+                        });
+                      }}
+                      className="text-[#9A3412] hover:text-[#7C2D12]"
+                      aria-label="Clear priority filter"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
 
-            <select
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value as Priority | 'all')}
-              className="bg-white border border-[#EFEFEF] rounded-md px-2.5 py-1.5 text-[#1A1E21] outline-none cursor-pointer"
-              style={{ fontSize: '12px' }}
-            >
-              <option value="all">All Priority</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
+            <div className="relative" ref={filterRef}>
+              <button
+                onClick={() => setFiltersOpen((v) => !v)}
+                className="flex items-center gap-1.5 bg-white border border-[#EFEFEF] rounded-md px-2.5 py-1.5 text-[#6B7280] hover:text-[#1A1E21] transition-colors"
+                style={{ fontSize: '12px' }}
+                aria-label="Filters"
+              >
+                <span className="relative inline-flex">
+                  <Filter className="w-3.5 h-3.5" />
+                  {(statusFilters.size > 0 || priorityFilters.size > 0) && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[#E17100]" />
+                  )}
+                </span>
+                Filters
+              </button>
+
+              {filtersOpen && (
+                <div className="absolute right-0 mt-2 w-56 bg-white border border-[#E5E7EB] rounded-md shadow-sm p-3 z-20">
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[#9CA3AF]" style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.05em' }}>
+                        STATUS
+                      </label>
+                      <div className="mt-1 space-y-1">
+                        {(['new', 'in_review', 'escalated', 'pending_info', 'closed'] as CaseStatus[]).map((status) => (
+                          <label key={status} className="flex items-center gap-2 text-[#1A1E21]" style={{ fontSize: '12px' }}>
+                            <input
+                              type="checkbox"
+                              checked={pendingStatusFilters.has(status)}
+                              onChange={(e) => {
+                                setPendingStatusFilters((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(status);
+                                  else next.delete(status);
+                                  return next;
+                                });
+                              }}
+                            />
+                            {statusLabels[status]}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="border-t border-[#E5E7EB] pt-2">
+                      <label className="text-[#9CA3AF]" style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.05em' }}>
+                        PRIORITY
+                      </label>
+                      <div className="mt-1 space-y-1">
+                        {(['critical', 'high', 'medium', 'low'] as Priority[]).map((priority) => (
+                          <label key={priority} className="flex items-center gap-2 text-[#1A1E21]" style={{ fontSize: '12px' }}>
+                            <input
+                              type="checkbox"
+                              checked={pendingPriorityFilters.has(priority)}
+                              onChange={(e) => {
+                                setPendingPriorityFilters((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(priority);
+                                  else next.delete(priority);
+                                  return next;
+                                });
+                              }}
+                            />
+                            {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => {
+                          setPendingStatusFilters(new Set());
+                          setPendingPriorityFilters(new Set());
+                        }}
+                        className="px-2.5 py-1 rounded-md text-[#6B7280] hover:text-[#1A1E21]"
+                        style={{ fontSize: '11px', fontWeight: 500 }}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        onClick={() => {
+                          setStatusFilters(new Set(pendingStatusFilters));
+                          setPriorityFilters(new Set(pendingPriorityFilters));
+                          setFiltersOpen(false);
+                        }}
+                        className="ml-auto px-2.5 py-1 rounded-md bg-[#023547] text-white"
+                        style={{ fontSize: '11px', fontWeight: 600 }}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-
         </div>
       </div>
 
       {/* Table */}
       <div className="px-6 py-3">
-        {selectedCaseIds.size >= 2 && (
-          <div className="mb-3 bg-white border border-[#E5E7EB] rounded-md px-3 py-2 flex items-center gap-3">
-            <span className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 600 }}>
-              {selectedCaseIds.size} selected
-            </span>
-            <select
-              value={groupRationale}
-              onChange={(e) => setGroupRationale(e.target.value as GroupRationale)}
-              className="bg-white border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none cursor-pointer"
-              style={{ fontSize: '12px' }}
-            >
-              <option value="same_name">Same name</option>
-              <option value="same_address">Same address</option>
-              <option value="same_ubo">Same UBO</option>
-              <option value="other">Other</option>
-            </select>
-            <div className="flex items-center gap-2">
-              <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>Confidence</span>
-              <input
-                type="number"
-                min={50}
-                max={100}
-                value={groupConfidence}
-                onChange={(e) => setGroupConfidence(Number(e.target.value))}
-                className="w-16 bg-white border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none"
+          {selectedCaseIds.size >= 2 && (
+            <div className="mb-3 bg-white border border-[#E5E7EB] rounded-md px-3 py-2 flex items-center gap-3">
+              <span className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 600 }}>
+                {selectedCaseIds.size} selected
+              </span>
+              <select
+                value={groupRationale}
+                onChange={(e) => setGroupRationale(e.target.value)}
+                className="bg-white border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none cursor-pointer"
                 style={{ fontSize: '12px' }}
-              />
-              <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>%</span>
+              >
+                <option value="same_name">Same name</option>
+                <option value="same_address">Same address</option>
+                <option value="same_ubo">Same UBO</option>
+                <option value="other">Other</option>
+              </select>
+              <div className="flex items-center gap-2">
+                <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>Confidence</span>
+                <input
+                  type="number"
+                  min={50}
+                  max={100}
+                  value={groupConfidence}
+                  onChange={(e) => setGroupConfidence(Number(e.target.value))}
+                  className="w-16 bg-white border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none"
+                  style={{ fontSize: '12px' }}
+                />
+                <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>%</span>
+              </div>
+              <button
+                onClick={createManualGroup}
+                className="ml-auto px-3 py-1.5 rounded-md bg-[#023547] text-white"
+                style={{ fontSize: '12px', fontWeight: 600 }}
+              >
+                Create group
+              </button>
+              <button
+                onClick={() => setSelectedCaseIds(new Set())}
+                className="px-3 py-1.5 rounded-md border border-[#E5E7EB] text-[#6B7280]"
+                style={{ fontSize: '12px', fontWeight: 500 }}
+              >
+                Clear
+              </button>
             </div>
-            <button
-              onClick={createManualGroup}
-              className="ml-auto px-3 py-1.5 rounded-md bg-[#023547] text-white"
-              style={{ fontSize: '12px', fontWeight: 600 }}
-            >
-              Create group
-            </button>
-            <button
-              onClick={() => setSelectedCaseIds(new Set())}
-              className="px-3 py-1.5 rounded-md border border-[#E5E7EB] text-[#6B7280]"
-              style={{ fontSize: '12px', fontWeight: 500 }}
-            >
-              Clear
-            </button>
-          </div>
-        )}
-        <div className="bg-white rounded-lg border border-[#EFEFEF] overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[#EFEFEF] bg-[#FAFBFC]">
-                <th className="p-2 pl-4 text-left" style={{ width: '28px' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedCaseIds.size > 0 && selectedCaseIds.size === selectableCaseIds.length}
-                    onChange={(e) => {
-                      if (e.target.checked) setSelectedCaseIds(new Set(selectableCaseIds));
-                      else setSelectedCaseIds(new Set());
-                    }}
-                  />
-                </th>
-                <th className="py-2 px-3 text-left"><SortButton field="priority" label="PRIORITY" /></th>
-                <th className="py-2 px-3 text-left"><SortButton field="sla" label="SLA" /></th>
-                <th className="py-2 px-3">
-                  <div className="flex justify-center">
-                    <SortButton field="risk" label="RISK" />
-                  </div>
-                </th>
-                <th className="py-2 px-3 text-left"><SortButton field="entity" label="ENTITY" /></th>
-                <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>SIGNALS</th>
-                <th className="py-2 px-3 text-center" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>EVIDENCE</th>
-                <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>STATUS</th>
-                <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>ANALYST</th>
-                <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>ACTIONS</th>
+          )}
+          <div className="bg-white rounded-lg border border-[#EFEFEF] overflow-hidden">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-[#EFEFEF] bg-[#FAFBFC]">
+                  <th className="p-2 pl-4 text-left" style={{ width: '28px' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedCaseIds.size > 0 && selectedCaseIds.size === selectableCaseIds.length}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedCaseIds(new Set(selectableCaseIds));
+                        else setSelectedCaseIds(new Set());
+                      }}
+                    />
+                  </th>
+                  <th className="py-2 px-3 pl-4 text-left"><SortButton field="priority" label="PRIORITY" /></th>
+                  <th className="py-2 px-3 text-left"><SortButton field="sla" label="SLA" /></th>
+                  <th className="py-2 px-3">
+                    <div className="flex justify-center">
+                      <SortButton field="risk" label="RISK" />
+                    </div>
+                  </th>
+                  <th className="py-2 px-3 text-left"><SortButton field="entity" label="ENTITY" /></th>
+                  <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>SIGNALS</th>
+                  <th className="py-2 px-3 text-center">
+                    <div className="flex justify-center">
+                      <SortButton field="evidence" label="EVIDENCE" />
+                    </div>
+                  </th>
+                  <th className="py-2 px-3 text-left">
+                    <SortButton field="status" label="STATUS" />
+                  </th>
+                  <th className="py-2 px-3 text-left">
+                    <SortButton field="analyst" label="ANALYST" />
+                  </th>
+                  <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
