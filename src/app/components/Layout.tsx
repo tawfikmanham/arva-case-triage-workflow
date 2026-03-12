@@ -5,7 +5,9 @@ export function Layout() {
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar />
-      <Outlet />
+      <div className="flex-1 min-w-0 h-screen bg-[#F5F5F5]">
+        <Outlet />
+      </div>
     </div>
   );
 }

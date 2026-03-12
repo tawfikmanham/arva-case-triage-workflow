@@ -1,718 +1,1047 @@
-import { useState } from 'react';
-import { useParams, useNavigate } from 'react-router';
+import { useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import {
   ArrowLeft,
-  FileText,
-  Clock,
-  User,
-  Building2,
-  MapPin,
-  Calendar,
-  AlertTriangle,
   CheckCircle2,
-  ArrowUpRight,
-  MessageSquare,
-  Paperclip,
+  ChevronDown,
+  ChevronRight,
+  Clock3,
   Copy,
-  XCircle,
-  Pause,
-  History,
   ExternalLink,
+  File,
+  FileImage,
+  FileText,
+  Pause,
+  Save,
+  ShieldAlert,
+  Upload,
+  ThumbsDown,
+  ThumbsUp,
+  X,
+  XCircle,
 } from 'lucide-react';
 import { cases, statusLabels } from '../data/cases';
-import type { CaseItem } from '../data/cases';
-import { SlaTimer } from './SlaTimer';
-import { SignalChip } from './SignalChip';
+import type { Signal } from '../data/cases';
+import { AppFooter } from './AppFooter';
 
-// Timeline data
-const timelineEvents = [
-  { time: '07:15', action: 'Alert triggered', detail: 'AML screening system flagged entity', type: 'system' as const },
-  { time: '07:16', action: 'Auto-enrichment', detail: 'Company registry, sanctions lists, adverse media queried', type: 'system' as const },
-  { time: '07:18', action: 'Risk score calculated', detail: 'Composite score generated from 4 signals', type: 'system' as const },
-  { time: '07:20', action: 'Assigned to queue', detail: 'Priority routing based on SLA policy', type: 'system' as const },
-];
+type DecisionAction = 'close_case' | 'escalate' | 'request_information' | 'pause_review';
 
-const documents = [
-  { name: 'Corporate Registry Extract', type: 'PDF', date: '2026-03-10' },
-  { name: 'Sanctions Screening Report', type: 'PDF', date: '2026-03-11' },
-  { name: 'Adverse Media Summary', type: 'HTML', date: '2026-03-11', unavailable: true },
-  { name: 'UBO Declaration', type: 'PDF', date: '2025-11-20' },
-];
+type SourceMeta = {
+  name: string;
+  trust: 'High' | 'Medium' | 'Low';
+  available: boolean;
+};
 
-const relatedCases = [
-  { id: 'AML-2026-4872', entity: 'ACME LTD', status: 'new' as const, riskScore: 78 },
-  { id: 'AML-2026-4873', entity: 'ACME Trading Corp', status: 'new' as const, riskScore: 71 },
-  { id: 'AML-2025-3201', entity: 'ACME LTD', status: 'closed' as const, riskScore: 45 },
+type SignalMeta = {
+  severity: 'Critical' | 'High' | 'Medium' | 'Low';
+  confidence: number;
+  summary: string;
+  explanation: string;
+  sourceCount: number;
+  evidence: string[];
+  sources: SourceMeta[];
+};
+
+type AttachmentItem = {
+  id: string;
+  name: string;
+  linkedSignal?: Signal;
+};
+
+type InvestigationTab = 'evidence' | 'communications' | 'similar_cases';
+
+const decisionActions: { key: DecisionAction; label: string }[] = [
+  { key: 'close_case', label: 'Close case' },
+  { key: 'escalate', label: 'Escalate' },
+  { key: 'request_information', label: 'Request information' },
+  { key: 'pause_review', label: 'Pause review' },
 ];
 
 const priorDecisions = [
-  { date: '2025-09-14', decision: 'Cleared', analyst: 'Marcus Reid', rationale: 'Name match only, no corroborating evidence found.' },
-  { date: '2025-06-02', decision: 'Escalated', analyst: 'Sarah Chen', rationale: 'Country risk flagged during periodic review. Sent to L2 for enhanced due diligence.' },
+  { date: '2025-09-14', decision: 'Cleared' },
+  { date: '2025-06-02', decision: 'Escalated' },
 ];
 
-const versionHistory = [
-  { version: 'v1.0', time: '2026-03-11 08:12', note: 'Case created from AML alert' },
-  { version: 'v1.1', time: '2026-03-11 08:34', note: 'Signals enriched (sanctions + adverse media)' },
-  { version: 'v1.2', time: '2026-03-11 09:05', note: 'Analyst notes updated' },
+const communicationThread = [
+  {
+    id: 'c1',
+    actor: 'Nora Chen',
+    role: 'Compliance Lead',
+    channel: 'Internal note',
+    timestamp: '2026-03-12 09:12',
+    message: 'Ownership structure changed last quarter. Validate latest registry extract before closure.',
+  },
+  {
+    id: 'c2',
+    actor: 'Ravi Singh',
+    role: 'Relationship Manager',
+    channel: 'Client email',
+    timestamp: '2026-03-12 08:46',
+    message: 'Client provided updated UBO declaration and asked for expedited review due to payment delays.',
+  },
+  {
+    id: 'c3',
+    actor: 'Amina Yusuf',
+    role: 'AML Analyst',
+    channel: 'Case note',
+    timestamp: '2026-03-11 17:29',
+    message: 'Name match score remains high, but adverse media source reliability is mixed. Pending corroboration.',
+  },
 ];
 
-type DecisionAction = 'clear' | 'escalate' | 'request_info' | 'mark_duplicate' | 'false_positive';
+const similarCases = [
+  {
+    id: 'AML-2025-4012',
+    entity: 'Eastern Harbor Logistics',
+    outcome: 'Escalated',
+    risk: 82,
+    resolutionTime: '4h 20m',
+    reason: 'Name match + UBO mismatch + high-risk corridor routing.',
+    rationale: 'Escalated due to ownership discrepancy confirmed by registry extract.',
+  },
+  {
+    id: 'AML-2025-3771',
+    entity: 'Meridian Capital Partners',
+    outcome: 'Request information',
+    risk: 76,
+    resolutionTime: '2h 05m',
+    reason: 'Adverse media cluster with low-confidence primary source.',
+    rationale: 'Requested supporting documents before final adverse-media determination.',
+  },
+  {
+    id: 'AML-2025-3298',
+    entity: 'Pacific Rim Commodities Ltd',
+    outcome: 'Cleared',
+    risk: 68,
+    resolutionTime: '1h 40m',
+    reason: 'Initial fuzzy name match later disproven by identifier mismatch.',
+    rationale: 'Cleared after strong counter-evidence and verified registry alignment.',
+  },
+];
+
+const signalCatalog: Record<Signal, SignalMeta> = {
+  'Name Match': {
+    severity: 'High',
+    confidence: 92,
+    summary: 'Name closely matches a sanctions listing.',
+    explanation: 'Canonicalized name and alias overlap exceed direct-review threshold.',
+    sourceCount: 2,
+    evidence: ['Alias overlap 0.92', 'Country and business class aligned'],
+    sources: [
+      { name: 'OFAC SDN', trust: 'High', available: true },
+      { name: 'EU Consolidated', trust: 'High', available: true },
+    ],
+  },
+  'Country Risk': {
+    severity: 'High',
+    confidence: 84,
+    summary: 'Jurisdiction is policy-tagged as high risk.',
+    explanation: 'Country policy triggered enhanced due diligence requirement.',
+    sourceCount: 2,
+    evidence: ['Jurisdiction flagged in policy map', 'Cross-border rule triggered'],
+    sources: [
+      { name: 'FATF', trust: 'High', available: true },
+      { name: 'Internal Policy', trust: 'High', available: true },
+    ],
+  },
+  'Adverse Media': {
+    severity: 'Medium',
+    confidence: 74,
+    summary: 'Recent media links entity to regulatory concerns.',
+    explanation: 'Entity resolution returned multiple relevant adverse records.',
+    sourceCount: 3,
+    evidence: ['Investigation mention in article', 'Repeated reference in two outlets'],
+    sources: [
+      { name: 'Reuters', trust: 'High', available: true },
+      { name: 'Dow Jones', trust: 'High', available: true },
+      { name: 'Regional Feed', trust: 'Low', available: false },
+    ],
+  },
+  PEP: {
+    severity: 'High',
+    confidence: 78,
+    summary: 'Ownership graph links to a politically exposed person.',
+    explanation: 'Control chain maps to active PEP profile.',
+    sourceCount: 2,
+    evidence: ['UBO linkage to PEP profile', 'Role period overlaps account activity'],
+    sources: [
+      { name: 'World-Check', trust: 'High', available: true },
+      { name: 'OpenSanctions', trust: 'Medium', available: true },
+    ],
+  },
+  'Sanctions Hit': {
+    severity: 'Critical',
+    confidence: 95,
+    summary: 'Direct sanctions hit on name and identifiers.',
+    explanation: 'Matching logic exceeded direct-hit threshold across multiple keys.',
+    sourceCount: 2,
+    evidence: ['Name and alias matched', 'Registry identifiers aligned'],
+    sources: [
+      { name: 'OFAC SDN', trust: 'High', available: true },
+      { name: 'UN Sanctions', trust: 'High', available: true },
+    ],
+  },
+  'UBO Mismatch': {
+    severity: 'High',
+    confidence: 86,
+    summary: 'Declared ownership differs from registry record.',
+    explanation: 'Submitted UBO data conflicts with latest registry extraction.',
+    sourceCount: 2,
+    evidence: ['Declared 25% vs registry 51%', 'Missing holding layer in declaration'],
+    sources: [
+      { name: 'Registry Extract', trust: 'High', available: true },
+      { name: 'UBO Form', trust: 'Medium', available: true },
+    ],
+  },
+  'High Volume': {
+    severity: 'Medium',
+    confidence: 69,
+    summary: 'Transaction volume materially exceeds peer baseline.',
+    explanation: '30-day rolling volume is above expected segment threshold.',
+    sourceCount: 2,
+    evidence: ['3.1x segment median', 'Spike pattern in recent counterparties'],
+    sources: [
+      { name: 'Internal Txn Data', trust: 'High', available: true },
+      { name: 'Peer Model', trust: 'Medium', available: true },
+    ],
+  },
+  'Shell Indicator': {
+    severity: 'Medium',
+    confidence: 72,
+    summary: 'Entity profile resembles shell-company traits.',
+    explanation: 'No operating footprint and layered ownership pattern detected.',
+    sourceCount: 2,
+    evidence: ['Address reused across multiple entities', 'No employee footprint'],
+    sources: [
+      { name: 'Business Registry', trust: 'High', available: true },
+      { name: 'Address Intelligence', trust: 'Medium', available: true },
+    ],
+  },
+};
+
+function riskTone(score: number) {
+  if (score >= 85) return 'bg-[#FEE2E2] text-[#991B1B]';
+  if (score >= 70) return 'bg-[#FFF7ED] text-[#9A3412]';
+  if (score >= 45) return 'bg-[#EFF6FF] text-[#1E40AF]';
+  return 'bg-[#F0FDF4] text-[#166534]';
+}
+
+function sourceTone(level: SourceMeta['trust']) {
+  if (level === 'High') return 'bg-[#F0FDF4] text-[#166534]';
+  if (level === 'Medium') return 'bg-[#EFF6FF] text-[#1E40AF]';
+  return 'bg-[#F3F4F6] text-[#6B7280]';
+}
 
 export function CaseDetail() {
   const { caseId } = useParams();
   const navigate = useNavigate();
-  const [selectedDecision, setSelectedDecision] = useState<DecisionAction | null>(null);
-  const [rationale, setRationale] = useState('');
-  const [isPaused, setIsPaused] = useState(false);
-  const [selectedEvidence, setSelectedEvidence] = useState<Set<string>>(new Set());
-  const [attachments, setAttachments] = useState<string[]>([]);
-
+  const location = useLocation();
   const caseData = cases.find((c) => c.id === caseId) || cases[0];
+  const backTarget = location.state?.from === 'duplicates' ? '/duplicates' : '/';
+
+  const [selectedDecision, setSelectedDecision] = useState<DecisionAction | null>(null);
+  const [activeInvestigationTab, setActiveInvestigationTab] = useState<InvestigationTab>('evidence');
+  const [rationale, setRationale] = useState('');
+  const [selectedEvidence, setSelectedEvidence] = useState<Set<string>>(new Set());
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
+  const [isDragOverAttachments, setIsDragOverAttachments] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const signalFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingSignalAttachment, setPendingSignalAttachment] = useState<Signal | null>(null);
+  const [expandedSignal, setExpandedSignal] = useState<Signal | null>(caseData.signals[0] ?? null);
+  const [reviewedSignals, setReviewedSignals] = useState<Set<Signal>>(new Set());
+  const [isPaused, setIsPaused] = useState(false);
+  const [isDraftSaved, setIsDraftSaved] = useState(false);
+  const [showReviewDuplicatesPrompt, setShowReviewDuplicatesPrompt] = useState(false);
+  const [recommendationFlagged, setRecommendationFlagged] = useState(false);
+  const [recommendationFeedback, setRecommendationFeedback] = useState<'up' | 'down' | null>(null);
+  const [duplicateDiscovered, setDuplicateDiscovered] = useState(false);
+
+  const duplicateLikelyCount = Math.max(caseData.duplicateCount, 2);
+  const aiConfidence = caseData.evidenceStrength === 'high' ? 87 : caseData.evidenceStrength === 'medium' ? 73 : 58;
+  const recommendedDecision: DecisionAction = caseData.riskScore >= 80 ? 'escalate' : 'request_information';
+
   const slaRatio = caseData.slaMinutesRemaining / caseData.slaTotalMinutes;
   const isOverdue = caseData.slaMinutesRemaining <= 0;
-  const isSlaRisk = slaRatio <= 0.15;
-  const isLowEvidence = caseData.evidenceStrength === 'low';
-  const hasClosePermission = caseData.priority !== 'critical';
-  const hasEscalatePermission = true;
+  const isSlaRisk = !isOverdue && slaRatio <= 0.15;
   const hasConflictingEvidence = caseData.signals.includes('Name Match') && caseData.signals.includes('UBO Mismatch');
-  const isEvidenceComplete = selectedEvidence.size > 0;
-  const isDecisionReady = selectedDecision && rationale.length >= 20 && isEvidenceComplete;
+  const hasMissingEvidence = caseData.evidenceStrength === 'low';
+  const hasSourceOutage = caseData.signals.some((s) => signalCatalog[s].sources.some((src) => !src.available));
+  const hasClosePermission = caseData.priority !== 'critical';
 
-  const decisionActions: { key: DecisionAction; label: string; icon: typeof CheckCircle2; color: string; bg: string }[] = [
-    { key: 'clear', label: 'Clear', icon: CheckCircle2, color: '#00A63E', bg: '#F0FDF4' },
-    { key: 'escalate', label: 'Escalate', icon: ArrowUpRight, color: '#E17100', bg: '#FFF7ED' },
-    { key: 'request_info', label: 'Request Info', icon: MessageSquare, color: '#6381F5', bg: '#EFF6FF' },
-    { key: 'mark_duplicate', label: 'Mark Duplicate', icon: Copy, color: '#6B7280', bg: '#F5F5F5' },
-    { key: 'false_positive', label: 'False Positive', icon: XCircle, color: '#9CA3AF', bg: '#F5F5F5' },
-  ];
+  const relatedCases = useMemo(() => {
+    if (caseData.duplicateGroupId) {
+      return cases.filter((c) => c.duplicateGroupId === caseData.duplicateGroupId && c.id !== caseData.id).slice(0, 2);
+    }
+    return cases.filter((c) => c.id !== caseData.id && c.entityName.split(' ')[0] === caseData.entityName.split(' ')[0]).slice(0, 2);
+  }, [caseData]);
+
+  const decisionLabel = decisionActions.find((d) => d.key === selectedDecision)?.label ?? 'None';
+  const rationaleMinChars = 1;
+  const rationaleValid = rationale.trim().length >= rationaleMinChars;
+  const hasEvidence = selectedEvidence.size > 0;
+  const hasPermission = !selectedDecision || selectedDecision !== 'close_case' || hasClosePermission;
+  const requiresEvidence = Boolean(selectedDecision && selectedDecision !== 'escalate');
+  const evidenceSatisfied = !requiresEvidence || hasEvidence;
+  const submitEnabled = Boolean(selectedDecision && rationaleValid && evidenceSatisfied && hasPermission);
+  const slaLabel = isOverdue ? 'Overdue' : `${Math.max(caseData.slaMinutesRemaining, 0)}m left`;
+
+  const appendAttachments = (files: FileList | File[], linkedSignal?: Signal) => {
+    const next = Array.from(files)
+      .filter((f) => f.name)
+      .map((f, idx) => ({
+        id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
+        name: f.name,
+        linkedSignal,
+      }));
+    if (next.length === 0) return;
+    setAttachments((prev) => [...prev, ...next]);
+    if (linkedSignal) {
+      const evidenceKey = `${linkedSignal} evidence`;
+      setSelectedEvidence((prev) => {
+        const updated = new Set(prev);
+        updated.add(evidenceKey);
+        return updated;
+      });
+    }
+  };
+
+  const attachmentIcon = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase();
+    if (ext && ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+      return <FileImage className="w-3.5 h-3.5 text-[#6B7280]" />;
+    }
+    if (ext && ['pdf', 'doc', 'docx', 'txt', 'rtf'].includes(ext)) {
+      return <FileText className="w-3.5 h-3.5 text-[#6B7280]" />;
+    }
+    return <File className="w-3.5 h-3.5 text-[#6B7280]" />;
+  };
+
+  const warningRows = [
+    isOverdue ? { tone: 'text-[#991B1B]', text: '• SLA breach. Escalation path required.' } : null,
+    isSlaRisk ? { tone: 'text-[#9A3412]', text: '• SLA at risk. Remaining time is below threshold.' } : null,
+    hasConflictingEvidence ? { tone: 'text-[#1E3A8A]', text: '• Conflicting evidence detected (Name Match vs UBO Mismatch).' } : null,
+    hasSourceOutage ? { tone: 'text-[#6B7280]', text: '• Data source unavailable for part of evidence set.' } : null,
+    hasMissingEvidence ? { tone: 'text-[#6B7280]', text: '• Missing evidence quality. Consider Request information.' } : null,
+    recommendationFlagged ? { tone: 'text-[#374151]', text: '• AI recommendation flagged by analyst.' } : null,
+    isPaused ? { tone: 'text-[#6B7280]', text: '• Review paused. Resume from current step.' } : null,
+    !hasPermission ? { tone: 'text-[#991B1B]', text: '• Insufficient permissions for selected decision.' } : null,
+  ].filter(Boolean) as { tone: string; text: string }[];
 
   return (
-    <div className="flex-1 min-w-0 h-screen overflow-hidden flex flex-col">
-      {/* Top bar */}
-      <div className="sticky top-0 z-10 bg-white border-b border-[#EFEFEF] px-6 py-2.5 flex items-center gap-4">
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-1.5 text-[#6B7280] hover:text-[#1A1E21] transition-colors"
-          style={{ fontSize: '13px' }}
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Inbox
-        </button>
-        <span className="text-[#E5E7EB]">|</span>
-        <span style={{ fontSize: '14px', fontWeight: 600, color: '#1A1E21' }}>{caseData.id}</span>
-        <span className="text-[#9CA3AF]" style={{ fontSize: '13px' }}>\u00b7</span>
-        <span style={{ fontSize: '14px', fontWeight: 500, color: '#1A1E21' }}>{caseData.entityName}</span>
+    <div className="flex-1 min-w-0 h-full overflow-hidden bg-[#F5F5F5] flex flex-col">
+      <div className="sticky top-0 z-20 bg-white border-b border-[#E6E8EC]">
+        <div className="px-6 py-3">
+          <div className="w-full flex items-center gap-3">
+            <button
+              onClick={() => navigate(backTarget)}
+              className="inline-flex items-center gap-1.5 text-[#6B7280] hover:text-[#1A1E21]"
+              style={{ fontSize: '12px' }}
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back
+            </button>
 
-        <div className="ml-auto flex items-center gap-3">
-          <SlaTimer minutesRemaining={caseData.slaMinutesRemaining} totalMinutes={caseData.slaTotalMinutes} />
-          <button
-            onClick={() => setIsPaused(!isPaused)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border transition-colors ${
-              isPaused
-                ? 'bg-[#FFF7ED] border-[#E17100] text-[#E17100]'
-                : 'bg-white border-[#EFEFEF] text-[#6B7280] hover:text-[#1A1E21]'
-            }`}
-            style={{ fontSize: '12px', fontWeight: 500 }}
-          >
-            {isPaused ? <History className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
-            {isPaused ? 'Resume' : 'Pause Review'}
-          </button>
+            <div className="h-4 w-px bg-[#E5E7EB]" />
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[#1A1E21] truncate" style={{ fontSize: '15px', fontWeight: 600 }}>{caseData.entityName}</span>
+                  <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>{caseData.id}</span>
+                </div>
+              </div>
+
+            <button
+              onClick={() => setIsDraftSaved(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1E21]"
+              style={{ fontSize: '12px', fontWeight: 500 }}
+            >
+              <Save className="w-3.5 h-3.5" />
+              Save draft
+            </button>
+            <button
+              onClick={() => setIsPaused((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border ${
+                isPaused ? 'border-[#E17100] text-[#9A3412] bg-[#FFF7ED]' : 'border-[#E5E7EB] text-[#6B7280]'
+              }`}
+              style={{ fontSize: '12px', fontWeight: 500 }}
+            >
+              <Pause className="w-3.5 h-3.5" />
+              {isPaused ? 'Resume' : 'Pause'}
+            </button>
+
+            <div
+              className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border ${
+                isOverdue
+                  ? 'border-[#FCA5A5] bg-[#FEE2E2] text-[#991B1B]'
+                  : isSlaRisk
+                    ? 'border-[#FDBA74] bg-[#FFF7ED] text-[#9A3412]'
+                    : 'border-[#E5E7EB] bg-white text-[#6B7280]'
+              }`}
+              style={{ fontSize: '12px', fontWeight: 600 }}
+            >
+              <Clock3 className="w-3.5 h-3.5" />
+              {slaLabel}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 3-column layout */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* LEFT -- Case metadata */}
-        <div className="w-[280px] min-w-[280px] border-r border-[#EFEFEF] overflow-y-auto bg-white">
-          <div className="p-4 space-y-5">
-            {/* Entity info */}
-            <section>
-              <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                ENTITY INFORMATION
-              </div>
-              <div className="space-y-2.5">
-                <div className="flex items-start gap-2.5">
-                  <Building2 className="w-4 h-4 text-[#9CA3AF] mt-0.5 flex-shrink-0" />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 500, color: '#1A1E21' }}>{caseData.entityName}</div>
-                    <div className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{caseData.entityType}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <MapPin className="w-4 h-4 text-[#9CA3AF] flex-shrink-0" />
-                  <span style={{ fontSize: '13px', color: '#6B7280' }}>{caseData.country}</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Calendar className="w-4 h-4 text-[#9CA3AF] flex-shrink-0" />
-                  <span style={{ fontSize: '13px', color: '#6B7280' }}>{caseData.createdAt.split('T')[0]}</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <User className="w-4 h-4 text-[#9CA3AF] flex-shrink-0" />
-                  <span style={{ fontSize: '13px', color: '#6B7280' }}>
-                    {caseData.assignedAnalyst || 'Unassigned'}
-                  </span>
-                </div>
-              </div>
-            </section>
-
-            <div className="border-t border-[#EFEFEF]" />
-
-            {/* Case metadata */}
-            <section>
-              <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                CASE DETAILS
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>Type</span>
-                  <span className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 500 }}>{caseData.caseType}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>Risk Score</span>
-                  <span
-                    style={{
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      color: caseData.riskScore >= 80 ? '#E7000B' : caseData.riskScore >= 60 ? '#E17100' : '#00A63E',
-                    }}
-                  >
-                    {caseData.riskScore}/100
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>Evidence</span>
-                  <span className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 500 }}>
-                    {caseData.evidenceStrength.charAt(0).toUpperCase() + caseData.evidenceStrength.slice(1)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9CA3AF]" style={{ fontSize: '12px' }}>Status</span>
-                  <span className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 500 }}>
-                    {statusLabels[caseData.status]}
-                  </span>
-                </div>
-              </div>
-            </section>
-
-            <div className="border-t border-[#EFEFEF]" />
-
-            {/* Related cases */}
-            <section>
-              <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                RELATED CASES
-              </div>
-              <div className="space-y-1.5">
-                {relatedCases.map((rc) => (
-                  <button
-                    key={rc.id}
-                    onClick={() => navigate(`/case/${rc.id}`)}
-                    className="w-full flex items-center justify-between px-2.5 py-2 rounded-md hover:bg-[#F5F5F5] transition-colors text-left"
-                  >
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+        <div className="flex-1">
+          <div className="mx-auto w-full max-w-[1440px] px-6 py-5 space-y-5">
+            <div className="grid grid-cols-12 gap-6">
+              <main className="col-span-12 xl:col-span-8 min-h-0 overflow-y-auto space-y-5">
+                <section className="bg-white border border-[#E6E8EC] rounded-lg p-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
-                      <div style={{ fontSize: '12px', fontWeight: 500, color: '#1A1E21' }}>{rc.id}</div>
-                      <div className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{rc.entity}</div>
+                      <div className="text-[#9CA3AF]" style={{ fontSize: '11px', fontWeight: 600 }}>Entity</div>
+                      <div className="text-[#1A1E21] mt-1" style={{ fontSize: '13px', fontWeight: 600 }}>{caseData.entityType}</div>
+                      <div className="text-[#6B7280] mt-0.5" style={{ fontSize: '12px' }}>{caseData.country}</div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="px-1.5 py-0.5 rounded"
-                        style={{
-                          fontSize: '11px',
-                          fontWeight: 500,
-                          backgroundColor: rc.status === 'closed' ? '#F0FDF4' : '#EFF6FF',
-                          color: rc.status === 'closed' ? '#166534' : '#1E40AF',
-                        }}
-                      >
-                        {rc.status === 'closed' ? 'Closed' : 'New'}
-                      </span>
-                      <ExternalLink className="w-3 h-3 text-[#9CA3AF]" />
+                    <div>
+                      <div className="text-[#9CA3AF]" style={{ fontSize: '11px', fontWeight: 600 }}>Case</div>
+                      <div className="text-[#1A1E21] mt-1" style={{ fontSize: '13px', fontWeight: 600 }}>{caseData.caseType}</div>
+                      <div className="text-[#6B7280] mt-0.5" style={{ fontSize: '12px' }}>Assignee: {caseData.assignedAnalyst ?? 'Unassigned'}</div>
                     </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <div className="border-t border-[#EFEFEF]" />
-
-            {/* Prior decisions */}
-            <section>
-              <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                PRIOR DECISIONS
-              </div>
-              <div className="space-y-3">
-                {priorDecisions.map((pd, i) => (
-                  <div key={i} className="bg-[#F9FAFB] rounded-md p-2.5">
-                    <div className="flex items-center justify-between mb-1">
-                      <span
-                        className={`px-1.5 py-0.5 rounded ${
-                          pd.decision === 'Cleared' ? 'bg-[#F0FDF4] text-[#166534]' : 'bg-[#FFF7ED] text-[#9A3412]'
-                        }`}
-                        style={{ fontSize: '11px', fontWeight: 500 }}
-                      >
-                        {pd.decision}
-                      </span>
-                      <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{pd.date}</span>
-                    </div>
-                    <p className="text-[#6B7280] mt-1" style={{ fontSize: '11px', lineHeight: '1.4' }}>
-                      {pd.rationale}
-                    </p>
-                    <span className="text-[#9CA3AF] mt-1 block" style={{ fontSize: '10px' }}>
-                      by {pd.analyst}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        </div>
-
-        {/* CENTER -- Evidence + timeline */}
-        <div className="flex-1 min-w-0 overflow-y-auto bg-[#F5F5F5]">
-          <div className="p-5 space-y-4">
-            {/* Edge case banners */}
-            {(isOverdue || isSlaRisk || isLowEvidence || isPaused || hasConflictingEvidence) && (
-              <div className="space-y-2">
-                {isOverdue && (
-                  <div className="bg-[#FEE2E2] border border-[#FCA5A5] text-[#991B1B] rounded-md px-3 py-2 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>SLA overdue</span>
-                    <span className="text-[#7F1D1D]" style={{ fontSize: '12px' }}>
-                      Escalation required. This case has missed the SLA window.
-                    </span>
-                  </div>
-                )}
-                {!isOverdue && isSlaRisk && (
-                  <div className="bg-[#FFF7ED] border border-[#FED7AA] text-[#9A3412] rounded-md px-3 py-2 flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>SLA at risk</span>
-                    <span className="text-[#9A3412]" style={{ fontSize: '12px' }}>
-                      Prioritize decisioning to avoid breach.
-                    </span>
-                  </div>
-                )}
-                {isLowEvidence && (
-                  <div className="bg-[#F5F5F5] border border-[#E5E7EB] text-[#6B7280] rounded-md px-3 py-2 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-[#9CA3AF]" />
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>Low evidence quality</span>
-                    <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>
-                      Some sources are missing or weak. Consider requesting more info.
-                    </span>
-                  </div>
-                )}
-                {hasConflictingEvidence && (
-                  <div className="bg-[#EFF6FF] border border-[#BFDBFE] text-[#1E3A8A] rounded-md px-3 py-2 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>Conflicting evidence</span>
-                    <span className="text-[#1E3A8A]" style={{ fontSize: '12px' }}>
-                      UBO mismatch conflicts with name match. Verify ownership chain.
-                    </span>
-                  </div>
-                )}
-                {isPaused && (
-                  <div className="bg-[#F9FAFB] border border-[#E5E7EB] text-[#6B7280] rounded-md px-3 py-2 flex items-center gap-2">
-                    <Pause className="w-4 h-4" />
-                    <span style={{ fontSize: '12px', fontWeight: 600 }}>Review paused</span>
-                    <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>
-                      Draft saved. Resume later without losing context.
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Signals detected */}
-            <div className="bg-white rounded-lg border border-[#EFEFEF] p-4">
-              <div className="text-[#9CA3AF] mb-3" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                SIGNALS DETECTED
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {caseData.signals.map((s) => (
-                  <SignalChip key={s} signal={s} />
-                ))}
-              </div>
-
-              {/* Signal details */}
-              <div className="mt-4 space-y-3">
-                {caseData.signals.map((signal) => (
-                  <div key={signal} className="bg-[#F9FAFB] rounded-md p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span style={{ fontSize: '13px', fontWeight: 500, color: '#1A1E21' }}>{signal}</span>
-                      <span
-                        className="px-1.5 py-0.5 rounded bg-[#FEE2E2] text-[#991B1B]"
-                        style={{ fontSize: '10px', fontWeight: 500 }}
-                      >
-                        Confidence: {caseData.evidenceStrength === 'high' ? '94%' : caseData.evidenceStrength === 'medium' ? '72%' : '45%'}
-                      </span>
-                    </div>
-                    <p className="text-[#6B7280]" style={{ fontSize: '12px', lineHeight: '1.5' }}>
-                      {signal === 'Name Match' && 'Entity name matches entry in consolidated sanctions list with fuzzy score 0.92. Manual verification recommended.'}
-                      {signal === 'Country Risk' && `Jurisdiction ${caseData.country} is classified as high-risk by FATF. Enhanced due diligence required.`}
-                      {signal === 'Adverse Media' && 'News articles from Reuters and Bloomberg reference entity in connection with regulatory investigation (2025).'}
-                      {signal === 'PEP' && 'Entity linked to politically exposed person through beneficial ownership chain. Direct association confidence high.'}
-                      {signal === 'Sanctions Hit' && 'Direct match found in OFAC SDN list. Entity name and country of registration align with designated party.'}
-                      {signal === 'UBO Mismatch' && 'Declared ultimate beneficial owner differs from registry data. Discrepancy in ownership percentage (declared 25%, registry shows 51%).'}
-                      {signal === 'Shell Indicator' && 'Entity exhibits shell company characteristics: no employees, registered agent address, circular ownership structure.'}
-                      {signal === 'High Volume' && 'Transaction volume exceeds 3x the peer group median for the last 30 days. Pattern consistent with layering.'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Documents */}
-            <div className="bg-white rounded-lg border border-[#EFEFEF] p-4">
-              <div className="text-[#9CA3AF] mb-3" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                DOCUMENTS
-              </div>
-              <div className="space-y-1">
-                {documents.map((doc, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
-                      doc.unavailable ? 'bg-[#F9FAFB] text-[#9CA3AF] cursor-not-allowed' : 'hover:bg-[#F9FAFB] cursor-pointer'
-                    }`}
-                  >
-                    <FileText className={`w-4 h-4 flex-shrink-0 ${doc.unavailable ? 'text-[#D1D5DB]' : 'text-[#6381F5]'}`} />
-                    <div className="flex-1">
-                      <span style={{ fontSize: '13px', color: '#1A1E21' }}>{doc.name}</span>
-                    </div>
-                    <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{doc.type}</span>
-                    <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{doc.date}</span>
-                    {doc.unavailable ? (
-                      <span className="text-[#D1D5DB]" style={{ fontSize: '11px' }}>Source unavailable</span>
-                    ) : (
-                      <Paperclip className="w-3.5 h-3.5 text-[#9CA3AF]" />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Activity timeline */}
-            <div className="bg-white rounded-lg border border-[#EFEFEF] p-4">
-              <div className="text-[#9CA3AF] mb-3" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                ACTIVITY TIMELINE
-              </div>
-              <div className="space-y-0">
-                {timelineEvents.map((event, i) => (
-                  <div key={i} className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <div className="w-2 h-2 rounded-full bg-[#023547] mt-1.5 flex-shrink-0" />
-                      {i < timelineEvents.length - 1 && (
-                        <div className="w-px flex-1 bg-[#EFEFEF] my-1" />
-                      )}
-                    </div>
-                    <div className="pb-4">
-                      <div className="flex items-center gap-2">
-                        <span style={{ fontSize: '13px', fontWeight: 500, color: '#1A1E21' }}>{event.action}</span>
-                        <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{event.time}</span>
+                    <div>
+                      <div className="text-[#9CA3AF]" style={{ fontSize: '11px', fontWeight: 600 }}>Related</div>
+                      <div className="text-[#1A1E21] mt-1" style={{ fontSize: '13px', fontWeight: 600 }}>
+                        {relatedCases.length > 0 ? `${relatedCases.length} linked cases` : 'No linked cases'}
                       </div>
-                      <p className="text-[#6B7280] mt-0.5" style={{ fontSize: '12px' }}>{event.detail}</p>
+                      <div className="text-[#6B7280] mt-0.5 truncate" style={{ fontSize: '12px' }}>
+                        {relatedCases[0] ? relatedCases[0].id : 'No active linkage'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[#9CA3AF]" style={{ fontSize: '11px', fontWeight: 600 }}>Prior Decisions</div>
+                      <div className="text-[#1A1E21] mt-1" style={{ fontSize: '13px', fontWeight: 600 }}>{priorDecisions.length} records</div>
+                      <div className="text-[#6B7280] mt-0.5" style={{ fontSize: '12px' }}>{priorDecisions[0].decision} on {priorDecisions[0].date}</div>
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT -- Decision panel */}
-        <div className="w-[300px] min-w-[300px] border-l border-[#EFEFEF] overflow-y-auto bg-white">
-          <div className="p-4 space-y-5">
-            {/* Recommendation + duplicate detection */}
-            <div className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-md p-3">
-              <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                AI RECOMMENDATION
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#1A1E21]" style={{ fontSize: '13px', fontWeight: 600 }}>
-                  Escalate
-                </span>
-                <span className="px-1.5 py-0.5 rounded bg-[#FFF7ED] text-[#9A3412]" style={{ fontSize: '10px', fontWeight: 500 }}>
-                  Confidence 72%
-                </span>
-              </div>
-              <p className="text-[#6B7280] mt-1" style={{ fontSize: '12px' }}>
-                High risk score with sanctions hit and adverse media. Review ownership chain before deciding.
-              </p>
-              <button
-                className="mt-2 text-[#1E40AF] hover:text-[#1E3A8A] underline"
-                style={{ fontSize: '11px' }}
-              >
-                Flag recommendation as incorrect
-              </button>
-            </div>
-
-            <div className="bg-white border border-[#EFEFEF] rounded-md p-3">
-              <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                DUPLICATE DETECTION
-              </div>
-              <div className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 600 }}>
-                2 related cases may be duplicates
-              </div>
-              <p className="text-[#6B7280] mt-1" style={{ fontSize: '12px' }}>
-                Matching entity name and address across recent alerts.
-              </p>
-              <button
-                className="mt-2 text-[#1E40AF] hover:text-[#1E3A8A] underline"
-                style={{ fontSize: '11px' }}
-              >
-                Review group
-              </button>
-            </div>
-
-            <div>
-              <div className="text-[#9CA3AF] mb-3" style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                DECISION
-              </div>
-
-              {/* Decision buttons */}
-              <div className="space-y-1.5">
-                {decisionActions.map((action) => (
-                  <button
-                    key={action.key}
-                    onClick={() => setSelectedDecision(action.key)}
-                    disabled={
-                      (action.key === 'clear' || action.key === 'false_positive') && !hasClosePermission
-                    }
-                    className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md border transition-all ${
-                      selectedDecision === action.key
-                        ? 'border-current ring-1 ring-current'
-                        : 'border-[#EFEFEF] hover:border-[#D1D5DB]'
-                    }`}
-                    style={{
-                      color: selectedDecision === action.key ? action.color : '#6B7280',
-                      backgroundColor: selectedDecision === action.key ? action.bg : 'transparent',
-                      opacity:
-                        (action.key === 'clear' || action.key === 'false_positive') && !hasClosePermission ? 0.5 : 1,
-                    }}
-                  >
-                    <action.icon className="w-4 h-4 flex-shrink-0" />
-                    <span style={{ fontSize: '13px', fontWeight: 500 }}>{action.label}</span>
-                  </button>
-                ))}
-              </div>
-              {!hasClosePermission && (
-                <div className="mt-2 text-[#9CA3AF]" style={{ fontSize: '11px' }}>
-                  You don’t have permission to close or mark false positives on critical cases.
-                </div>
-              )}
-            </div>
-
-            {selectedDecision && (
-              <>
-                <div className="border-t border-[#EFEFEF]" />
-
-                {/* Rationale */}
-                <div>
-                  <label
-                    className="text-[#9CA3AF] block mb-2"
-                    style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}
-                  >
-                    RATIONALE <span className="text-[#E7000B]">*</span>
-                  </label>
-                  <textarea
-                    value={rationale}
-                    onChange={(e) => setRationale(e.target.value)}
-                    placeholder="Provide rationale for this decision..."
-                    className="w-full bg-[#F9FAFB] border border-[#EFEFEF] rounded-md px-3 py-2.5 text-[#1A1E21] placeholder:text-[#9CA3AF] outline-none focus:border-[#023547] resize-none transition-colors"
-                    style={{ fontSize: '13px', minHeight: '100px' }}
-                  />
-                  <div className="flex justify-between mt-1">
-                    <span className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>
-                      Minimum 20 characters
+                  <div className="mt-4 pt-3 border-t border-[#EEF0F2] flex flex-wrap items-center gap-2">
+                    <span className="inline-flex h-7 items-center rounded-md px-2.5 bg-[#EFF6FF] text-[#1E40AF]" style={{ fontSize: '11px', fontWeight: 600 }}>
+                      Status: {statusLabels[caseData.status]}
                     </span>
-                    <span className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>
-                      {rationale.length} chars
+                    <span className={`inline-flex h-7 items-center rounded-md px-2.5 ${riskTone(caseData.riskScore)}`} style={{ fontSize: '11px', fontWeight: 600 }}>
+                      Risk: {caseData.riskScore}
+                    </span>
+                    <button
+                      onClick={() => navigate('/duplicates')}
+                      className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 bg-[#EFF6FF] text-[#1E40AF]"
+                      style={{ fontSize: '11px', fontWeight: 600 }}
+                    >
+                      <Copy className="w-3 h-3" />
+                      Duplicates: {duplicateLikelyCount}
+                    </button>
+                  </div>
+                </section>
+                {duplicateDiscovered && (
+                  <section className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[#1E3A8A]" style={{ fontSize: '12px', fontWeight: 700 }}>
+                          Duplicate case detected
+                        </div>
+                        <div className="text-[#1E40AF]" style={{ fontSize: '11px' }}>
+                          Review grouped duplicates before final decision.
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowReviewDuplicatesPrompt(true)}
+                        className="inline-flex items-center gap-1 px-2 py-1 border border-[#BFDBFE] rounded-md text-[#1E40AF] bg-white"
+                        style={{ fontSize: '11px', fontWeight: 600 }}
+                      >
+                        <Copy className="w-3 h-3" />
+                        Review duplicates
+                      </button>
+                    </div>
+                  </section>
+                )}
+                {warningRows.length > 0 && (
+                  <section className="bg-white border border-[#E6E8EC] rounded-lg p-4">
+                    <div className="text-[#1A1E21] mb-2" style={{ fontSize: '13px', fontWeight: 600 }}>Review Warnings</div>
+                    <div className="space-y-2">
+                      {warningRows.map((row) => (
+                        <div key={row.text} className={row.tone} style={{ fontSize: '12px' }}>{row.text}</div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                <section className="bg-white border border-[#E6E8EC] rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3 min-h-[28px]">
+                    <h2 className="text-[#1A1E21]" style={{ fontSize: '14px', fontWeight: 600 }}>Investigation Workspace</h2>
+                    <button
+                      onClick={() => {
+                        if (activeInvestigationTab !== 'evidence') return;
+                        setDuplicateDiscovered(true);
+                      }}
+                      className={`inline-flex items-center gap-1 px-2 py-1 border border-[#E5E7EB] rounded-md text-[#6B7280] transition-opacity ${
+                        activeInvestigationTab === 'evidence' ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                      }`}
+                      style={{ fontSize: '11px' }}
+                      aria-hidden={activeInvestigationTab !== 'evidence'}
+                      tabIndex={activeInvestigationTab === 'evidence' ? 0 : -1}
+                    >
+                      <Copy className="w-3 h-3" />
+                      Duplicate discovered
+                    </button>
+                  </div>
+
+                  <div
+                    className="mb-3 flex items-center gap-1 border-b border-[#E5E7EB]"
+                    role="tablist"
+                    aria-label="Investigation tabs"
+                  >
+                    <button
+                      onClick={() => setActiveInvestigationTab('evidence')}
+                      role="tab"
+                      aria-selected={activeInvestigationTab === 'evidence'}
+                      className={`px-2.5 py-2 -mb-px border-b-2 ${
+                        activeInvestigationTab === 'evidence'
+                          ? 'border-[#023547] text-[#023547]'
+                          : 'border-transparent text-[#6B7280] hover:text-[#1A1E21]'
+                      }`}
+                      style={{ fontSize: '11px', fontWeight: 600 }}
+                    >
+                      Signals and Evidence
+                    </button>
+                    <button
+                      onClick={() => setActiveInvestigationTab('communications')}
+                      role="tab"
+                      aria-selected={activeInvestigationTab === 'communications'}
+                      className={`px-2.5 py-2 -mb-px border-b-2 ${
+                        activeInvestigationTab === 'communications'
+                          ? 'border-[#023547] text-[#023547]'
+                          : 'border-transparent text-[#6B7280] hover:text-[#1A1E21]'
+                      }`}
+                      style={{ fontSize: '11px', fontWeight: 600 }}
+                    >
+                      Communications
+                    </button>
+                    <button
+                      onClick={() => setActiveInvestigationTab('similar_cases')}
+                      role="tab"
+                      aria-selected={activeInvestigationTab === 'similar_cases'}
+                      className={`px-2.5 py-2 -mb-px border-b-2 ${
+                        activeInvestigationTab === 'similar_cases'
+                          ? 'border-[#023547] text-[#023547]'
+                          : 'border-transparent text-[#6B7280] hover:text-[#1A1E21]'
+                      }`}
+                      style={{ fontSize: '11px', fontWeight: 600 }}
+                    >
+                      Similar Cases
+                    </button>
+                  </div>
+
+                  {activeInvestigationTab === 'evidence' && (
+                    <div className="space-y-3">
+                      {caseData.signals.map((signal) => {
+                        const meta = signalCatalog[signal];
+                        const isOpen = expandedSignal === signal;
+                        const reviewed = reviewedSignals.has(signal);
+                        const evidenceKey = `${signal} evidence`;
+                        const linkedCount = attachments.filter((file) => file.linkedSignal === signal).length;
+                        const linkedFiles = attachments.filter((file) => file.linkedSignal === signal);
+
+                        return (
+                          <div key={signal} className="border border-[#E5E7EB] rounded-lg overflow-hidden bg-white">
+                            <button
+                              onClick={() => setExpandedSignal(isOpen ? null : signal)}
+                              className="w-full px-4 py-3 text-left flex items-center gap-3 hover:bg-[#FAFBFC]"
+                            >
+                              {isOpen ? (
+                                <ChevronDown className="w-4 h-4 text-[#6B7280] self-start mt-0.5" />
+                              ) : (
+                                <ChevronRight className="w-4 h-4 text-[#6B7280] self-start mt-0.5" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-[#1A1E21]" style={{ fontSize: '13px', fontWeight: 600 }}>{signal}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-[#FFF7ED] text-[#9A3412]" style={{ fontSize: '10px', fontWeight: 600 }}>{meta.severity}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-[#EFF6FF] text-[#1E40AF]" style={{ fontSize: '10px', fontWeight: 600 }}>{meta.confidence}%</span>
+                                  <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>{meta.sourceCount} sources</span>
+                                </div>
+                                <div className="text-[#6B7280] mt-1" style={{ fontSize: '12px' }}>{meta.summary}</div>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setReviewedSignals((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(signal)) next.delete(signal);
+                                    else next.add(signal);
+                                    return next;
+                                  });
+                                }}
+                                className={`inline-flex items-center gap-1 rounded-md px-2 py-1 border ${
+                                  reviewed
+                                    ? 'border-[#BBF7D0] bg-[#F0FDF4] text-[#166534]'
+                                    : 'border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#1A1E21]'
+                                }`}
+                                style={{ fontSize: '10px', fontWeight: 600 }}
+                              >
+                                {reviewed ? (
+                                  <>
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    Reviewed
+                                  </>
+                                ) : (
+                                  'Mark reviewed'
+                                )}
+                              </button>
+                            </button>
+
+                            {isOpen && (
+                              <div className="border-t border-[#E5E7EB] px-4 py-4 bg-[#FCFDFE]">
+                                <p className="text-[#374151]" style={{ fontSize: '12px', lineHeight: '1.5' }}>{meta.explanation}</p>
+                                <div className="mt-3 space-y-1">
+                                  {meta.evidence.map((line) => (
+                                    <div key={line} className="text-[#6B7280]" style={{ fontSize: '12px' }}>• {line}</div>
+                                  ))}
+                                </div>
+                                <div className="mt-3 grid sm:grid-cols-2 gap-2">
+                                  {meta.sources.map((src) => (
+                                    <div key={src.name} className="border border-[#E5E7EB] rounded-md px-2 py-2 flex items-center justify-between">
+                                      <div>
+                                        <div className="text-[#1A1E21]" style={{ fontSize: '11px', fontWeight: 600 }}>{src.name}</div>
+                                        <span className={`inline-flex mt-1 px-1.5 py-0.5 rounded ${sourceTone(src.trust)}`} style={{ fontSize: '10px', fontWeight: 600 }}>
+                                          {src.trust} trust
+                                        </span>
+                                      </div>
+                                      {src.available ? (
+                                        <button className="text-[#1E40AF]"><ExternalLink className="w-3.5 h-3.5" /></button>
+                                      ) : (
+                                        <span className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>Outage</span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="mt-3 flex items-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setPendingSignalAttachment(signal);
+                                      signalFileInputRef.current?.click();
+                                    }}
+                                    className="px-2 py-1 rounded-md border border-[#E5E7EB] text-[#6B7280]"
+                                    style={{ fontSize: '11px' }}
+                                  >
+                                    {linkedCount > 0 ? `Add documents (${linkedCount})` : 'Attach documents'}
+                                  </button>
+                                </div>
+                                {linkedFiles.length > 0 && (
+                                  <div className="mt-2 space-y-1.5">
+                                    {linkedFiles.map((file) => (
+                                      <div key={file.id} className="flex items-center justify-between bg-white border border-[#E5E7EB] rounded px-2 py-1">
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                          {attachmentIcon(file.name)}
+                                          <span className="text-[#1A1E21] truncate" style={{ fontSize: '11px' }}>
+                                            {file.name}
+                                          </span>
+                                        </div>
+                                        <button
+                                          onClick={() => {
+                                            setAttachments((prev) => {
+                                              const next = prev.filter((item) => item.id !== file.id);
+                                              const hasRemainingForSignal = next.some((item) => item.linkedSignal === signal);
+                                              if (!hasRemainingForSignal) {
+                                                setSelectedEvidence((prevEvidence) => {
+                                                  const updated = new Set(prevEvidence);
+                                                  updated.delete(evidenceKey);
+                                                  return updated;
+                                                });
+                                              }
+                                              return next;
+                                            });
+                                          }}
+                                          className="inline-flex items-center justify-center text-[#9CA3AF] hover:text-[#6B7280]"
+                                          aria-label="Remove linked attachment"
+                                        >
+                                          <XCircle className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {activeInvestigationTab === 'communications' && (
+                    <div className="space-y-2">
+                      {communicationThread.map((item) => (
+                        <div key={item.id} className="border border-[#E5E7EB] rounded-md px-3 py-2.5 bg-[#FCFDFE]">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 600 }}>
+                              {item.actor} • {item.role}
+                            </div>
+                            <div className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>{item.timestamp}</div>
+                          </div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className="inline-flex h-5 items-center rounded px-1.5 bg-[#F3F4F6] text-[#6B7280]" style={{ fontSize: '10px', fontWeight: 600 }}>
+                              {item.channel}
+                            </span>
+                          </div>
+                          <p className="mt-1.5 text-[#4B5563]" style={{ fontSize: '12px', lineHeight: '1.5' }}>{item.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeInvestigationTab === 'similar_cases' && (
+                    <div className="space-y-2">
+                      {similarCases.map((item) => (
+                        <div key={item.id} className="border border-[#E5E7EB] rounded-md px-3 py-2.5 bg-[#FCFDFE]">
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <div className="text-[#1A1E21]" style={{ fontSize: '12px', fontWeight: 600 }}>
+                                {item.id} • {item.entity}
+                              </div>
+                              <div className="text-[#6B7280]" style={{ fontSize: '11px' }}>
+                                Outcome: {item.outcome} • Risk {item.risk} • Resolved in {item.resolutionTime}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="mt-2 text-[#4B5563]" style={{ fontSize: '12px' }}>
+                            <span style={{ fontWeight: 600 }}>Why similar:</span> {item.reason}
+                          </div>
+                          <div className="mt-1 text-[#6B7280]" style={{ fontSize: '11px' }}>
+                            <span style={{ fontWeight: 600 }}>Prior rationale:</span> {item.rationale}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </main>
+
+              <aside className="col-span-12 xl:col-span-4 self-start xl:sticky xl:top-0">
+                <div className="bg-white border border-[#E6E8EC] rounded-lg p-4 space-y-4">
+                  <section className="pb-3 border-b border-[#E5E7EB]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[#9CA3AF]" style={{ fontSize: '11px', fontWeight: 600 }}>AI RECOMMENDATION</div>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="text-[#1A1E21]" style={{ fontSize: '13px', fontWeight: 600 }}>
+                      {decisionActions.find((d) => d.key === recommendedDecision)?.label}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-[#EFF6FF] text-[#1E40AF]" style={{ fontSize: '10px', fontWeight: 600 }}>
+                      {aiConfidence}%
                     </span>
                   </div>
-                </div>
-
-                {/* Evidence references */}
-                <div>
-                  <label
-                    className="text-[#9CA3AF] block mb-2"
-                    style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}
-                  >
-                    EVIDENCE REFERENCES
-                  </label>
-                  <div className="space-y-1">
-                    {documents.slice(0, 3).map((doc, i) => (
-                      <label
-                        key={i}
-                        className="flex items-center gap-2 px-2.5 py-1.5 rounded hover:bg-[#F9FAFB] cursor-pointer transition-colors"
+                  <p className="mt-1 text-[#6B7280]" style={{ fontSize: '12px', lineHeight: '1.45' }}>
+                    Recommendation may be incorrect. Use analyst judgment.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => setSelectedDecision(recommendedDecision)}
+                      className="px-2 py-1 rounded-md border border-[#E5E7EB] text-[#6B7280]"
+                      style={{ fontSize: '11px' }}
+                    >
+                      Apply AI decision
+                    </button>
+                    <div className="ml-auto inline-flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setRecommendationFeedback('up');
+                          setRecommendationFlagged(false);
+                        }}
+                        className={`inline-flex items-center justify-center h-7 w-7 rounded-md border ${
+                          recommendationFeedback === 'up'
+                            ? 'border-[#166534] bg-[#F0FDF4] text-[#166534]'
+                            : 'border-[#E5E7EB] text-[#6B7280]'
+                        }`}
+                        aria-label="Thumbs up recommendation"
                       >
+                        <ThumbsUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRecommendationFeedback('down');
+                          setRecommendationFlagged(true);
+                        }}
+                        className={`inline-flex items-center justify-center h-7 w-7 rounded-md border ${
+                          recommendationFeedback === 'down'
+                            ? 'border-[#9A3412] bg-[#FFF7ED] text-[#9A3412]'
+                            : 'border-[#E5E7EB] text-[#6B7280]'
+                        }`}
+                        aria-label="Thumbs down recommendation"
+                      >
+                        <ThumbsDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                  <section className="bg-[#F9FAFB] border border-[#E5E7EB] rounded-md p-2.5">
+                <div className="text-[#9CA3AF] mb-1.5" style={{ fontSize: '11px', fontWeight: 600 }}>
+                  CHECKLIST (START HERE)
+                </div>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-[#6B7280]" style={{ fontSize: '11px' }}>
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${selectedDecision ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
+                    Decision selected
+                  </div>
+                  <div className="flex items-center gap-2 text-[#6B7280]" style={{ fontSize: '11px' }}>
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${rationaleValid ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
+                    Rationale complete
+                  </div>
+                  <div className="flex items-center gap-2 text-[#6B7280]" style={{ fontSize: '11px' }}>
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${selectedDecision && evidenceSatisfied ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
+                    {requiresEvidence ? 'Evidence linked' : 'Evidence optional for escalate'}
+                  </div>
+                  <div className="flex items-center gap-2 text-[#6B7280]" style={{ fontSize: '11px' }}>
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${hasPermission ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
+                    Permission verified
+                  </div>
+                </div>
+              </section>
+
+                  <section>
+                <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 600 }}>DECISION</div>
+                <div className="relative">
+                  <select
+                    value={selectedDecision ?? ''}
+                    onChange={(e) => setSelectedDecision((e.target.value || null) as DecisionAction | null)}
+                    className="w-full appearance-none px-3 pr-10 py-2 rounded-md border border-[#E5E7EB] bg-white text-[#1A1E21] outline-none focus:border-[#023547]"
+                    style={{ fontSize: '12px', fontWeight: 500 }}
+                  >
+                    <option value="">Select a decision</option>
+                    {decisionActions.map((action) => (
+                      <option key={action.key} value={action.key}>
+                        {action.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-[#9CA3AF] pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" />
+                </div>
+                {!hasPermission && (
+                  <div className="mt-2 flex items-start gap-2 text-[#991B1B] bg-[#FEE2E2] border border-[#FCA5A5] rounded-md px-2 py-1.5">
+                    <ShieldAlert className="w-4 h-4 mt-0.5" />
+                    <span style={{ fontSize: '11px' }}>You do not have permission for this decision on critical cases.</span>
+                  </div>
+                )}
+              </section>
+
+                  <section>
+                <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 600 }}>RATIONALE *</div>
+                <textarea
+                  value={rationale}
+                  onChange={(e) => setRationale(e.target.value)}
+                  placeholder="Explain your decision and reference evidence."
+                  className="w-full min-h-[110px] resize-y bg-[#F9FAFB] border border-[#E5E7EB] rounded-md px-3 py-2 text-[#1A1E21] outline-none focus:border-[#023547]"
+                  style={{ fontSize: '12px' }}
+                />
+                <div className="mt-1 flex items-center justify-between text-[#9CA3AF]" style={{ fontSize: '10px' }}>
+                  <span />
+                  <span>{rationale.trim().length} chars</span>
+                </div>
+              </section>
+
+                  <section>
+                <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 600 }}>ATTACHMENTS (OPTIONAL)</div>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragOverAttachments(true);
+                  }}
+                  onDragLeave={() => setIsDragOverAttachments(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOverAttachments(false);
+                    appendAttachments(e.dataTransfer.files);
+                  }}
+                  className={`mb-3 rounded-md border border-dashed px-3 py-4 text-center transition-colors ${
+                    isDragOverAttachments
+                      ? 'border-[#1E40AF] bg-[#EFF6FF]'
+                      : 'border-[#D1D5DB] bg-[#FAFBFC]'
+                  }`}
+                >
+                  <Upload className="w-4 h-4 mx-auto text-[#6B7280]" />
+                  <div className="mt-1 text-[#1A1E21]" style={{ fontSize: '11px', fontWeight: 600 }}>
+                    Drag and drop files here
+                  </div>
+                  <div className="mt-0.5 text-[#9CA3AF]" style={{ fontSize: '10px' }}>
+                    PDF, Word, images, or any supporting file
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="mt-2 inline-flex items-center text-[#6B7280] hover:text-[#1A1E21]"
+                    style={{ fontSize: '10px', fontWeight: 600 }}
+                  >
+                    Browse files
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files) appendAttachments(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+                <input
+                  ref={signalFileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && pendingSignalAttachment) {
+                      appendAttachments(e.target.files, pendingSignalAttachment);
+                    }
+                    setPendingSignalAttachment(null);
+                    e.target.value = '';
+                  }}
+                />
+                {attachments.length === 0 && <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px' }}>No attachments.</div>}
+                {attachments.map((file) => (
+                  <div key={file.id} className="flex items-center justify-between bg-[#F9FAFB] border border-[#E5E7EB] rounded px-2 py-1 mb-1.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {attachmentIcon(file.name)}
+                      <div className="min-w-0">
+                        <div className="text-[#1A1E21] truncate" style={{ fontSize: '11px' }}>{file.name}</div>
+                        {file.linkedSignal && (
+                          <div className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>
+                            From {file.linkedSignal}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setAttachments((prev) => prev.filter((item) => item.id !== file.id))}
+                      className="inline-flex items-center justify-center text-[#9CA3AF] hover:text-[#6B7280]"
+                      aria-label="Remove attachment"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </section>
+
+                  <section>
+                <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '11px', fontWeight: 600 }}>
+                  EVIDENCE REFERENCES {requiresEvidence ? '*' : ''}
+                </div>
+                <div className="space-y-1.5">
+                  {caseData.signals.map((signal) => {
+                    const key = `${signal} evidence`;
+                    return (
+                      <label key={key} className="flex items-center gap-2">
                         <input
                           type="checkbox"
-                          className="rounded border-[#D1D5DB] accent-[#023547]"
-                          checked={selectedEvidence.has(doc.name)}
+                          checked={selectedEvidence.has(key)}
                           onChange={(e) => {
                             setSelectedEvidence((prev) => {
                               const next = new Set(prev);
-                              if (e.target.checked) next.add(doc.name);
-                              else next.delete(doc.name);
+                              if (e.target.checked) next.add(key);
+                              else next.delete(key);
                               return next;
                             });
                           }}
+                          className="accent-[#023547]"
                         />
-                        <span className="text-[#6B7280]" style={{ fontSize: '12px' }}>{doc.name}</span>
+                        <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>{key}</span>
                       </label>
-                    ))}
+                    );
+                  })}
+                </div>
+                {requiresEvidence && !hasEvidence && (
+                  <div className="mt-1 text-[#E7000B]" style={{ fontSize: '10px' }}>
+                    Select at least one evidence reference.
                   </div>
-                  {!isEvidenceComplete && (
-                    <div className="text-[#E7000B] mt-1" style={{ fontSize: '10px' }}>
-                      Add at least one evidence reference.
+                )}
+              </section>
+
+                  <button
+                    disabled={!submitEnabled}
+                    className={`w-full py-2.5 rounded-md ${
+                      submitEnabled ? 'bg-[#023547] text-white hover:bg-[#03465D]' : 'bg-[#EFEFEF] text-[#9CA3AF] cursor-not-allowed'
+                    }`}
+                    style={{ fontSize: '13px', fontWeight: 600 }}
+                  >
+                    Submit Decision
+                  </button>
+                  {!submitEnabled && (
+                    <div className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>
+                      {requiresEvidence
+                        ? 'Complete rationale, evidence, and permission checks to submit.'
+                        : 'Complete rationale and permission checks to submit.'}
                     </div>
                   )}
-                </div>
-
-                {/* Attachments */}
-                <div>
-                  <label
-                    className="text-[#9CA3AF] block mb-2"
-                    style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.05em' }}
-                  >
-                    ATTACHMENTS
-                  </label>
-                  <div className="space-y-2">
-                    {attachments.length === 0 && (
-                      <div className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>
-                        No attachments added.
-                      </div>
-                    )}
-                    {attachments.map((name, i) => (
-                      <div
-                        key={`${name}-${i}`}
-                        className="flex items-center justify-between bg-[#F9FAFB] border border-[#EFEFEF] rounded-md px-2.5 py-1.5"
-                      >
-                        <span className="text-[#1A1E21]" style={{ fontSize: '12px' }}>{name}</span>
-                        <button
-                          onClick={() => setAttachments((prev) => prev.filter((_, idx) => idx !== i))}
-                          className="text-[#9CA3AF] hover:text-[#6B7280]"
-                          style={{ fontSize: '11px' }}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      onClick={() => setAttachments((prev) => [...prev, 'Analyst note.pdf'])}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[#E5E7EB] text-[#1A1E21] hover:bg-white"
-                      style={{ fontSize: '11px', fontWeight: 500 }}
-                    >
-                      <Paperclip className="w-3 h-3" />
-                      Add attachment
-                    </button>
+                  <div className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>
+                    Selected decision: {decisionLabel}
                   </div>
                 </div>
-
-                {/* Decision checklist */}
-                <div className="bg-white border border-[#EFEFEF] rounded-md p-3">
-                  <div className="text-[#9CA3AF] mb-2" style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                    DECISION CHECKLIST
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${selectedDecision ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
-                      <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>Action selected</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${rationale.length >= 20 ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
-                      <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>Rationale meets minimum length</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${isEvidenceComplete ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
-                      <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>Evidence references attached</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${hasClosePermission ? 'text-[#00A63E]' : 'text-[#D1D5DB]'}`} />
-                      <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>Permission verified</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Audit info */}
-                <div className="bg-[#F9FAFB] rounded-md p-3">
-                  <div className="text-[#9CA3AF] mb-1.5" style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                    AUDIT TRAIL
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>Analyst</span>
-                      <span className="text-[#1A1E21]" style={{ fontSize: '11px', fontWeight: 500 }}>Current User</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>Timestamp</span>
-                      <span className="text-[#1A1E21]" style={{ fontSize: '11px', fontWeight: 500 }}>
-                        {new Date().toISOString().split('T')[0]} {new Date().toTimeString().slice(0, 5)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#9CA3AF]" style={{ fontSize: '11px' }}>Review time</span>
-                      <span className="text-[#1A1E21]" style={{ fontSize: '11px', fontWeight: 500 }}>2m 34s</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Version history */}
-                <div className="bg-white border border-[#EFEFEF] rounded-md p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[#9CA3AF]" style={{ fontSize: '10px', fontWeight: 500, letterSpacing: '0.05em' }}>
-                      VERSION HISTORY
-                    </span>
-                    <span className="text-[#1A1E21]" style={{ fontSize: '10px', fontWeight: 600 }}>Current: v1.2</span>
-                  </div>
-                  <div className="space-y-2">
-                    {versionHistory.map((v) => (
-                      <div key={v.version} className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-[#1A1E21]" style={{ fontSize: '11px', fontWeight: 600 }}>{v.version}</div>
-                          <div className="text-[#6B7280]" style={{ fontSize: '11px' }}>{v.note}</div>
-                        </div>
-                        <div className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>{v.time}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    className="mt-2 text-[#1E40AF] hover:text-[#1E3A8A] underline"
-                    style={{ fontSize: '11px' }}
-                  >
-                    View full history
-                  </button>
-                </div>
-
-                {/* Submit */}
-                <button
-                  disabled={!isDecisionReady}
-                  className={`w-full py-2.5 rounded-md transition-colors ${
-                    isDecisionReady
-                      ? 'bg-[#023547] text-white hover:bg-[#034b63]'
-                      : 'bg-[#EFEFEF] text-[#9CA3AF] cursor-not-allowed'
-                  }`}
-                  style={{ fontSize: '13px', fontWeight: 600 }}
-                >
-                  Submit Decision
-                </button>
-
-                {/* Keyboard shortcut hint */}
-                <div className="text-center">
-                  <span className="text-[#9CA3AF]" style={{ fontSize: '10px' }}>
-                    Press <kbd className="px-1.5 py-0.5 bg-[#EFEFEF] rounded text-[#6B7280]" style={{ fontSize: '10px' }}>Ctrl + Enter</kbd> to submit
-                  </span>
-                </div>
-              </>
-            )}
-
-            {!selectedDecision && (
-              <div className="bg-[#F9FAFB] rounded-md p-4 text-center">
-                <AlertTriangle className="w-5 h-5 text-[#9CA3AF] mx-auto mb-2" />
-                <p className="text-[#6B7280]" style={{ fontSize: '12px' }}>
-                  Select a decision action above to proceed with this case.
-                </p>
-              </div>
-            )}
+              </aside>
+            </div>
           </div>
         </div>
+        <div className="px-6 pt-0 pb-4">
+          <AppFooter />
+        </div>
       </div>
+      {showReviewDuplicatesPrompt && (
+        <div
+          className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center px-4"
+          onClick={() => setShowReviewDuplicatesPrompt(false)}
+        >
+          <div
+            className="w-full max-w-[420px] bg-white border border-[#E5E7EB] rounded-lg shadow-sm p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[#1A1E21]" style={{ fontSize: '14px', fontWeight: 600 }}>
+              Open Duplicates?
+            </div>
+            <div className="mt-1 text-[#6B7280]" style={{ fontSize: '12px', lineHeight: '1.5' }}>
+              Current review updates are not submitted yet.
+            </div>
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setIsDraftSaved(true);
+                  setShowReviewDuplicatesPrompt(false);
+                  navigate('/duplicates');
+                }}
+                className="px-3 py-1.5 rounded-md border border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1E21] hover:bg-[#FAFBFC]"
+                style={{ fontSize: '12px', fontWeight: 600 }}
+              >
+                Save progress
+              </button>
+              <button
+                onClick={() => {
+                  setShowReviewDuplicatesPrompt(false);
+                  navigate('/duplicates');
+                }}
+                className="px-3 py-1.5 rounded-md border border-[#E5E7EB] text-[#9A3412] bg-[#FFF7ED] hover:bg-[#FFEDD5]"
+                style={{ fontSize: '12px', fontWeight: 600 }}
+              >
+                Discard changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {isDraftSaved && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-12 z-40">
+          <div className="inline-flex min-w-[250px] items-center justify-between gap-2 bg-[#F0FDF4] border border-[#BBF7D0] text-[#166534] rounded-md px-3 py-2 shadow-sm">
+            <span style={{ fontSize: '12px', fontWeight: 600 }}>Draft saved</span>
+            <button
+              onClick={() => setIsDraftSaved(false)}
+              className="inline-flex items-center justify-center text-[#166534]/70 hover:text-[#166534]"
+              aria-label="Dismiss draft saved message"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
