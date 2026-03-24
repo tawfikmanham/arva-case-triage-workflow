@@ -46,18 +46,10 @@ const caseTypes = ['AML Alert', 'KYC Review', 'Sanctions Screening', 'Transactio
 const entityTypes = ['Corporate', 'Individual'];
 const analysts = ['Sarah Chen', 'Marcus Reid', 'Liam Patel', 'Nora Ali'];
 
-const duplicateGroupNames = [
-  'ACME LTD',
-  'Greenleaf Holdings Ltd',
-  'Pacific Rim Trading Co',
-  'Meridian Finance Group',
-  'Nordica Shipping AS',
-  'Bright Star Consulting',
-  'Orchid Capital Partners',
-  'Bluewater Logistics',
-  'Aster Global Ventures',
-  'Summit Ridge Holdings',
-];
+const DUPLICATE_ENTITY_NAME = 'ACME LTD';
+const DUPLICATE_ENTITY_COUNTRY = 'US';
+const TARGET_DUPLICATE_CASES = 30;
+const TARGET_SLA_BREACH_CASES = 15;
 
 function inferEntityType(entityName: string): (typeof entityTypes)[number] {
   const corporatePattern = /\b(ltd|limited|llc|inc|corp|co|company|group|holdings|capital|partners|ventures|logistics|finance|trading|shipping|consulting)\b/i;
@@ -119,41 +111,37 @@ function makeCreatedAt(i: number) {
 const cases: CaseItem[] = [];
 let idx = 0;
 
-// 30 duplicates across 10 entities (3 each)
-for (let g = 0; g < duplicateGroupNames.length; g += 1) {
-  const groupId = `grp-${g + 1}`;
-  for (let k = 0; k < 3; k += 1) {
-    const isHighPriority = idx < 15;
-    const priority: Priority = idx < 5 ? 'critical' : idx < 15 ? 'high' : 'medium';
-    const signalsCount = 1 + Math.floor(rng() * 4);
-    const signals = pickUniqueSignals(signalsCount);
-    const slaTotalMinutes = isHighPriority ? 240 : 480;
-    const slaMinutesRemaining = isHighPriority
-      ? 10 + Math.floor(rng() * 50)
-      : 180 + Math.floor(rng() * 240);
+// 30 duplicates for one single entity.
+for (let k = 0; k < TARGET_DUPLICATE_CASES; k += 1) {
+  const isHighPriority = idx < 15;
+  const priority: Priority = idx < 5 ? 'critical' : idx < 15 ? 'high' : 'medium';
+  const signalsCount = 1 + Math.floor(rng() * 4);
+  const signals = pickUniqueSignals(signalsCount);
+  const slaTotalMinutes = isHighPriority ? 240 : 480;
+  const slaMinutesRemaining = isHighPriority
+    ? 10 + Math.floor(rng() * 50)
+    : 180 + Math.floor(rng() * 240);
 
-    const entityName = duplicateGroupNames[g];
-    cases.push({
-      id: makeId(idx),
-      entityName,
-      entityType: inferEntityType(entityName),
-      signals,
-      evidenceStrength: evidenceForSignals(signals.length),
-      riskScore: riskScoreFor(priority),
-      priority,
-      slaMinutesRemaining,
-      slaTotalMinutes,
-      status: statusForIndex(idx),
-      assignedAnalyst: statusForIndex(idx) === 'new' ? null : pick(analysts),
-      duplicateGroupId: groupId,
-      duplicateCount: 3,
-      createdAt: makeCreatedAt(idx),
-      country: pick(countries),
-      caseType: pick(caseTypes),
-    });
+  cases.push({
+    id: makeId(idx),
+    entityName: DUPLICATE_ENTITY_NAME,
+    entityType: inferEntityType(DUPLICATE_ENTITY_NAME),
+    signals,
+    evidenceStrength: evidenceForSignals(signals.length),
+    riskScore: riskScoreFor(priority),
+    priority,
+    slaMinutesRemaining,
+    slaTotalMinutes,
+    status: statusForIndex(idx),
+    assignedAnalyst: statusForIndex(idx) === 'new' ? null : pick(analysts),
+    duplicateGroupId: 'grp-1',
+    duplicateCount: TARGET_DUPLICATE_CASES,
+    createdAt: makeCreatedAt(idx),
+    country: DUPLICATE_ENTITY_COUNTRY,
+    caseType: pick(caseTypes),
+  });
 
-    idx += 1;
-  }
+  idx += 1;
 }
 
 // 90 standalone cases
@@ -189,6 +177,18 @@ for (let i = 0; i < 90; i += 1) {
 
   idx += 1;
 }
+
+// Ensure exactly 15 SLA-breach cases for dashboard and inbox filtering demos.
+cases.forEach((c, i) => {
+  if (i < TARGET_SLA_BREACH_CASES) {
+    c.slaTotalMinutes = 240;
+    c.slaMinutesRemaining = 12 + (i % 20); // Always <= 15% of total.
+    return;
+  }
+  if ((c.slaMinutesRemaining / c.slaTotalMinutes) <= 0.15) {
+    c.slaMinutesRemaining = Math.ceil(c.slaTotalMinutes * 0.2);
+  }
+});
 
 export { cases };
 

@@ -7,9 +7,7 @@ import {
   ArrowUp,
   ArrowDown,
   Filter,
-  User,
   X,
-  Pencil,
 } from 'lucide-react';
 import { cases, statusLabels, priorityOrder } from '../data/cases';
 import type { CaseItem, Priority, CaseStatus } from '../data/cases';
@@ -74,14 +72,13 @@ function StatusBadge({ status }: { status: CaseStatus }) {
   );
 }
 
-type SortField = 'sla' | 'risk' | 'priority' | 'entity' | 'evidence' | 'status' | 'analyst';
+type SortField = 'sla' | 'risk' | 'priority' | 'entity' | 'status';
 type SortDir = 'asc' | 'desc';
 
 export function CaseInbox() {
   const navigate = useNavigate();
   const location = useLocation();
   const { mergedGroupIds, unmergeGroup } = useMergedGroups();
-  const signedInAnalyst = 'Tawfik Manham';
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [sortField, setSortField] = useState<SortField>('sla');
@@ -92,9 +89,6 @@ export function CaseInbox() {
   const [pendingPriorityFilters, setPendingPriorityFilters] = useState<Set<Priority>>(new Set());
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterRef = useRef<HTMLDivElement | null>(null);
-  const [analystMenuOpenFor, setAnalystMenuOpenFor] = useState<string | null>(null);
-  const [analystSearch, setAnalystSearch] = useState('');
-  const [assignedOverrides, setAssignedOverrides] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     if (!filtersOpen) return;
@@ -110,15 +104,10 @@ export function CaseInbox() {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, [filtersOpen, statusFilters, priorityFilters]);
 
-  const analysts = ['Sarah Chen', 'Marcus Reid', 'Liam Patel', 'Nora Ali', 'Ava Williams', 'Daniel Park'];
-
   const queryFilter = useMemo(() => {
     const filter = new URLSearchParams(location.search).get('filter');
     return filter ?? 'all';
   }, [location.search]);
-
-  const getVisibleAssignee = (c: CaseItem) =>
-    queryFilter === 'mine' ? signedInAnalyst : (assignedOverrides[c.id] ?? c.assignedAnalyst);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -132,12 +121,6 @@ export function CaseInbox() {
     pending_info: 3,
     closed: 4,
   };
-  const evidenceOrder: Record<CaseItem['evidenceStrength'], number> = {
-    high: 0,
-    medium: 1,
-    low: 2,
-  };
-
   const filteredAndSorted = useMemo(() => {
     let filtered = cases.filter((c) => {
       if (searchQuery) {
@@ -160,20 +143,13 @@ export function CaseInbox() {
         case 'risk': cmp = a.riskScore - b.riskScore; break;
         case 'priority': cmp = priorityOrder[a.priority] - priorityOrder[b.priority]; break;
         case 'entity': cmp = a.entityName.localeCompare(b.entityName); break;
-        case 'evidence': cmp = evidenceOrder[a.evidenceStrength] - evidenceOrder[b.evidenceStrength]; break;
         case 'status': cmp = statusOrder[a.status] - statusOrder[b.status]; break;
-        case 'analyst': {
-          const aName = (getVisibleAssignee(a) ?? '').toLowerCase();
-          const bName = (getVisibleAssignee(b) ?? '').toLowerCase();
-          cmp = aName.localeCompare(bName);
-          break;
-        }
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
 
     return filtered;
-  }, [searchQuery, statusFilters, priorityFilters, sortField, sortDir, queryFilter, assignedOverrides]);
+  }, [searchQuery, statusFilters, priorityFilters, sortField, sortDir, queryFilter]);
 
   const renderOrder = useMemo(() => {
     type RenderItem =
@@ -238,13 +214,8 @@ export function CaseInbox() {
   }
 
   function CaseRow({ c, isGroupChild = false }: { c: CaseItem; isGroupChild?: boolean }) {
-    const isCriticalSla = (c.slaMinutesRemaining / c.slaTotalMinutes) <= 0.15;
     const signalsToShow = c.signals.slice(0, 2);
     const remainingSignals = c.signals.length - signalsToShow.length;
-    const assigned = getVisibleAssignee(c);
-    const isMenuOpen = analystMenuOpenFor === c.id;
-    const filteredAnalysts = analysts.filter((a) => a.toLowerCase().includes(analystSearch.toLowerCase()));
-    const initials = assigned ? assigned.split(' ').map((p) => p[0]).join('').slice(0, 2) : '';
     return (
       <tr
         key={c.id}
@@ -265,18 +236,8 @@ export function CaseInbox() {
             </div>
           </div>
         </td>
-        {/* SLA - Most prominent column */}
-        <td className="py-2.5 px-2" style={{ width: '112px' }}>
-          <SlaTimer minutesRemaining={c.slaMinutesRemaining} totalMinutes={c.slaTotalMinutes} />
-        </td>
-        {/* Risk Score */}
-        <td className="py-2.5 px-2" style={{ width: '50px' }}>
-          <div className="flex justify-center">
-            <RiskScoreBadge score={c.riskScore} />
-          </div>
-        </td>
         {/* Entity */}
-        <td className="py-2.5 px-3" style={{ width: '180px' }}>
+        <td className="py-2.5 px-3" style={{ width: '220px' }}>
           <div>
             <span className="text-[#1A1E21] block" style={{ fontSize: '13px', fontWeight: 500 }}>
               {c.entityName}
@@ -286,8 +247,18 @@ export function CaseInbox() {
             </span>
           </div>
         </td>
+        {/* SLA - Most prominent column */}
+        <td className="py-2.5 px-2" style={{ width: '112px' }}>
+          <SlaTimer minutesRemaining={c.slaMinutesRemaining} totalMinutes={c.slaTotalMinutes} />
+        </td>
+        {/* Risk Score */}
+        <td className="py-2.5 px-2" style={{ width: '64px' }}>
+          <div className="flex justify-center">
+            <RiskScoreBadge score={c.riskScore} />
+          </div>
+        </td>
         {/* Signals */}
-        <td className="py-2.5 px-3" style={{ width: '260px' }}>
+        <td className="py-2.5 px-3" style={{ width: '320px' }}>
           <div className="flex flex-wrap gap-1">
             {signalsToShow.map((s) => (
               <SignalChip key={s} signal={s} />
@@ -302,115 +273,9 @@ export function CaseInbox() {
             )}
           </div>
         </td>
-        {/* Evidence */}
-        <td className="py-2.5 px-3 text-center" style={{ width: '80px' }}>
-          <span
-            className={`inline-block px-1.5 py-0.5 rounded ${
-              c.evidenceStrength === 'high'
-                ? 'bg-[#F0FDF4] text-[#166534]'
-                : c.evidenceStrength === 'medium'
-                ? 'bg-[#FFF7ED] text-[#9A3412]'
-                : 'bg-[#F5F5F5] text-[#6B7280]'
-            }`}
-            style={{ fontSize: '11px', fontWeight: 500 }}
-          >
-            {c.evidenceStrength.charAt(0).toUpperCase() + c.evidenceStrength.slice(1)}
-          </span>
-        </td>
         {/* Status */}
-        <td className="py-2.5 px-3" style={{ width: '100px' }}>
-          <StatusBadge status={c.status} />
-        </td>
-        {/* Analyst */}
-        <td className="py-2.5 px-3" style={{ width: '110px' }}>
-          <div className="relative">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setAnalystMenuOpenFor(isMenuOpen ? null : c.id);
-                setAnalystSearch('');
-              }}
-              className="text-left w-full flex items-center gap-2"
-            >
-              <div className="flex items-center gap-2 flex-1">
-                {assigned ? (
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#E5E7EB] text-[#6B7280]" style={{ fontSize: '9px', fontWeight: 600 }}>
-                    {initials}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#F3F4F6] text-[#9CA3AF]">
-                    <User className="w-3 h-3" />
-                  </span>
-                )}
-                {assigned ? (
-                  <span className="text-[#6B7280] block truncate max-w-[72px]" style={{ fontSize: '12px' }}>{assigned}</span>
-                ) : (
-                  <span className="text-[#D1D5DB]" style={{ fontSize: '12px' }}>Unassigned</span>
-                )}
-              </div>
-              <Pencil className="w-3.5 h-3.5 text-[#9CA3AF]" />
-            </button>
-
-            {isMenuOpen && (
-              <div
-                className="absolute right-0 mt-2 w-52 bg-white border border-[#E5E7EB] rounded-md shadow-sm p-2 z-20"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  type="text"
-                  placeholder="Search team..."
-                  value={analystSearch}
-                  onChange={(e) => setAnalystSearch(e.target.value)}
-                  className="w-full bg-[#F9FAFB] border border-[#E5E7EB] rounded-md px-2 py-1 text-[#1A1E21] outline-none"
-                  style={{ fontSize: '12px' }}
-                />
-                <div className="mt-2 max-h-36 overflow-auto">
-                  {filteredAnalysts.map((a) => (
-                    <div
-                      key={a}
-                      className="w-full flex items-center justify-between px-2 py-1 rounded hover:bg-[#F3F4F6]"
-                    >
-                      <button
-                        onClick={() => {
-                          setAssignedOverrides((prev) => ({ ...prev, [c.id]: a }));
-                          setAnalystMenuOpenFor(null);
-                        }}
-                        className="text-left text-[#1A1E21] flex-1"
-                        style={{ fontSize: '12px' }}
-                      >
-                        {a}
-                      </button>
-                      {assigned === a && (
-                        <button
-                          onClick={() => {
-                            setAssignedOverrides((prev) => ({ ...prev, [c.id]: null }));
-                            setAnalystMenuOpenFor(null);
-                          }}
-                          className="text-[#6B7280] hover:text-[#1A1E21]"
-                          aria-label="Unassign"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </td>
-        {/* Actions */}
         <td className="py-2.5 px-3" style={{ width: '120px' }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate(`/case/${c.id}`);
-            }}
-            className="px-2.5 py-1 rounded-md border border-[#E5E7EB] text-[#1A1E21] hover:bg-white"
-            style={{ fontSize: '11px', fontWeight: 500 }}
-          >
-            Review
-          </button>
+          <StatusBadge status={c.status} />
         </td>
       </tr>
     );
@@ -425,17 +290,11 @@ export function CaseInbox() {
       (acc, c) => (priorityOrder[c.priority] < priorityOrder[acc] ? c.priority : acc),
       groupCases[0].priority,
     );
-    const evidenceSet = new Set(groupCases.map((c) => c.evidenceStrength));
-    const evidenceLabel = evidenceSet.size === 1 ? groupCases[0].evidenceStrength : 'mixed';
     const statusSet = new Set(groupCases.map((c) => c.status));
     const statusLabel = statusSet.size === 1 ? statusLabels[groupCases[0].status] : 'Mixed';
     const signalSet = new Set(groupCases.flatMap((c) => c.signals));
     const topSignals = Array.from(signalSet).slice(0, 2);
     const remainingSignals = Math.max(signalSet.size - topSignals.length, 0);
-    const analystSet = new Set(
-      groupCases.map((c) => getVisibleAssignee(c)).filter(Boolean),
-    );
-    const analystLabel = analystSet.size === 0 ? 'Unassigned' : analystSet.size === 1 ? Array.from(analystSet)[0] : 'Multiple';
 
     return (
       <React.Fragment>
@@ -446,20 +305,39 @@ export function CaseInbox() {
           <td className="py-2.5 px-3 pl-6" style={{ width: '160px' }}>
             <div className="flex items-center gap-2">
               <PriorityIndicator priority={groupPriority} />
-              <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>
-                {groupCases.length} merged cases
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[#6B7280]" style={{ fontSize: '11px' }}>
+                  {groupCases.length} merged cases
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unmergeGroup(groupId);
+                    setExpandedGroups((prev) => {
+                      const next = new Set(prev);
+                      next.delete(groupId);
+                      return next;
+                    });
+                  }}
+                  className="px-2 py-0.5 rounded border border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1E21] hover:bg-white"
+                  style={{ fontSize: '10px', fontWeight: 500 }}
+                >
+                  Unmerge
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleMergedGroup(groupId);
+                  }}
+                  className="px-1.5 py-0.5 rounded text-[#6B7280] hover:text-[#1A1E21] hover:bg-[#F3F4F6]"
+                  aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
+                >
+                  {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                </button>
+              </div>
             </div>
           </td>
-          <td className="py-2.5 px-2" style={{ width: '112px' }}>
-            <SlaTimer minutesRemaining={minSla} totalMinutes={leadCase.slaTotalMinutes} />
-          </td>
-          <td className="py-2.5 px-2" style={{ width: '50px' }}>
-            <div className="flex justify-center">
-              <RiskScoreBadge score={maxRisk} />
-            </div>
-          </td>
-          <td className="py-2.5 px-3" style={{ width: '180px' }}>
+          <td className="py-2.5 px-3" style={{ width: '220px' }}>
             <div>
               <span className="text-[#1A1E21] block" style={{ fontSize: '13px', fontWeight: 600 }}>
                 {leadCase.entityName}
@@ -469,7 +347,15 @@ export function CaseInbox() {
               </span>
             </div>
           </td>
-          <td className="py-2.5 px-3" style={{ width: '260px' }}>
+          <td className="py-2.5 px-2" style={{ width: '112px' }}>
+            <SlaTimer minutesRemaining={minSla} totalMinutes={leadCase.slaTotalMinutes} />
+          </td>
+          <td className="py-2.5 px-2" style={{ width: '64px' }}>
+            <div className="flex justify-center">
+              <RiskScoreBadge score={maxRisk} />
+            </div>
+          </td>
+          <td className="py-2.5 px-3" style={{ width: '320px' }}>
             <div className="flex flex-wrap gap-1">
               {topSignals.map((signal) => (
                 <SignalChip key={signal} signal={signal} />
@@ -481,23 +367,7 @@ export function CaseInbox() {
               )}
             </div>
           </td>
-          <td className="py-2.5 px-3 text-center" style={{ width: '80px' }}>
-            <span
-              className={`inline-block px-1.5 py-0.5 rounded ${
-                evidenceLabel === 'high'
-                  ? 'bg-[#F0FDF4] text-[#166534]'
-                  : evidenceLabel === 'medium'
-                  ? 'bg-[#FFF7ED] text-[#9A3412]'
-                  : evidenceLabel === 'low'
-                  ? 'bg-[#F5F5F5] text-[#6B7280]'
-                  : 'bg-[#E5E7EB] text-[#6B7280]'
-              }`}
-              style={{ fontSize: '11px', fontWeight: 500 }}
-            >
-              {evidenceLabel === 'mixed' ? 'Mixed' : evidenceLabel.charAt(0).toUpperCase() + evidenceLabel.slice(1)}
-            </span>
-          </td>
-          <td className="py-2.5 px-3" style={{ width: '100px' }}>
+          <td className="py-2.5 px-3" style={{ width: '120px' }}>
             {statusLabel === 'Mixed' ? (
               <span className="inline-flex items-center px-2 py-0.5 rounded bg-[#F3F4F6] text-[#6B7280]" style={{ fontSize: '11px', fontWeight: 500 }}>
                 Mixed
@@ -505,51 +375,6 @@ export function CaseInbox() {
             ) : (
               <StatusBadge status={leadCase.status} />
             )}
-          </td>
-          <td className="py-2.5 px-3" style={{ width: '110px' }}>
-            <span className="text-[#6B7280] block truncate" style={{ fontSize: '12px' }}>{analystLabel}</span>
-          </td>
-          <td className="py-2.5 px-3" style={{ width: '120px' }}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate(`/case/${leadCase.id}`);
-                  }}
-                  className="px-2.5 py-1 rounded-md border border-[#E5E7EB] text-[#1A1E21] hover:bg-white"
-                  style={{ fontSize: '11px', fontWeight: 500 }}
-                >
-                  Review
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    unmergeGroup(groupId);
-                    setExpandedGroups((prev) => {
-                      const next = new Set(prev);
-                      next.delete(groupId);
-                      return next;
-                    });
-                  }}
-                  className="px-2.5 py-1 rounded-md border border-[#E5E7EB] text-[#6B7280] hover:text-[#1A1E21] hover:bg-white"
-                  style={{ fontSize: '11px', fontWeight: 500 }}
-                >
-                  Unmerge
-                </button>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleMergedGroup(groupId);
-                }}
-                className="px-2 py-1 rounded-md text-[#6B7280] hover:text-[#1A1E21] hover:bg-[#F3F4F6]"
-                aria-label={isExpanded ? 'Collapse group' : 'Expand group'}
-                style={{ fontSize: '11px', fontWeight: 500 }}
-              >
-                {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              </button>
-            </div>
           </td>
         </tr>
         {isExpanded && groupCases.map((c) => (
@@ -776,26 +601,17 @@ export function CaseInbox() {
                 <thead>
                   <tr className="border-b border-[#EFEFEF] bg-[#FAFBFC]">
                     <th className="py-2 px-3 pl-6 text-left"><SortButton field="priority" label="PRIORITY" /></th>
+                    <th className="py-2 px-3 text-left"><SortButton field="entity" label="ENTITY" /></th>
                     <th className="py-2 px-3 text-left"><SortButton field="sla" label="SLA" /></th>
-                    <th className="py-2 px-3">
+                    <th className="py-2 px-3 text-center">
                       <div className="flex justify-center">
                         <SortButton field="risk" label="RISK" />
                       </div>
                     </th>
-                    <th className="py-2 px-3 text-left"><SortButton field="entity" label="ENTITY" /></th>
                     <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>SIGNALS</th>
-                    <th className="py-2 px-3 text-center">
-                      <div className="flex justify-center">
-                        <SortButton field="evidence" label="EVIDENCE" />
-                      </div>
-                    </th>
                     <th className="py-2 px-3 text-left">
                       <SortButton field="status" label="STATUS" />
                     </th>
-                    <th className="py-2 px-3 text-left">
-                      <SortButton field="analyst" label="ANALYST" />
-                    </th>
-                    <th className="py-2 px-3 text-left" style={{ fontSize: '11px', fontWeight: 500, color: '#6B7280', letterSpacing: '0.03em' }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
